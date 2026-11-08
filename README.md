@@ -127,5 +127,10 @@ first commit) and rerun with a fresh folder. Then move dev work to the new tree.
 - Raw ninja needs `VsDevCmd.bat -arch=x64` and `DEPOT_TOOLS_WIN_TOOLCHAIN=0`
   (both scripts do this).
 - V8 metagen needs `gn.exe` in `build\src\buildtools\win\`.
+- ungoogled prunes the checked-in `.tlb` files; `midl.py` then leaves 0-byte
+  `.tlb` placeholders in `third_party\win_build_output` and asserts on them in
+  any later build. Both scripts delete 0-byte `.tlb` files before ninja.
+- Clang 23 can't build Chromium's precompiled headers, so `dev.gn` sets
+  `enable_precompiled_headers=false` (official builds don't use PCH anyway).
 - Python 3.12 at `%LOCALAPPDATA%\Programs\Python\Python312` with the `clang`
   pip package (for V8 metagen's libclang bindings).

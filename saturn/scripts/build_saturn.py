@@ -85,6 +85,11 @@ def main():
       gn_dst = SRC / 'buildtools' / 'win' / 'gn.exe'
       log(f'copying {gn_src} -> {gn_dst}')
       shutil.copy2(gn_src, gn_dst)
+      # midl.py leaves 0-byte .tlb placeholders (ungoogled prunes the real
+      # ones); a rerun would assert on them.
+      for tlb in (SRC / 'third_party' / 'win_build_output').rglob('*.tlb'):
+        if tlb.stat().st_size == 0:
+          tlb.unlink()
     return orig_run(*args, **kwargs)
 
   build._run_build_process = run  # pylint: disable=protected-access

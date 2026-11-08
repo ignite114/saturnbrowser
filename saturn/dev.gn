@@ -11,6 +11,9 @@ blink_symbol_level = 0
 v8_symbol_level = 0
 chrome_pgo_phase = 0
 use_thin_lto = false
+# Clang 23 rejects build/precompile.cc ("missing 'export module'");
+# official builds never use PCH either.
+enable_precompiled_headers = false
 
 # --- toolchain / platform (from flags.windows.gn) ---
 is_clang = true

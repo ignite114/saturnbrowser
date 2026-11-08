@@ -18,6 +18,10 @@ set DEPOT_TOOLS_WIN_TOOLCHAIN=0
 rem V8 metagen needs gn.exe in buildtools (ungoogled only puts it in out\Default).
 if not exist "%SRC%\buildtools\win\gn.exe" copy /y "%SRC%\out\Default\gn.exe" "%SRC%\buildtools\win\gn.exe" >nul
 
+rem midl.py leaves 0-byte .tlb placeholders in the source tree (ungoogled prunes
+rem the real ones); on the next run they make it assert. Remove them first.
+for /r "%SRC%\third_party\win_build_output" %%F in (*.tlb) do if %%~zF==0 del "%%F"
+
 if not exist "%OUT%" mkdir "%OUT%"
 for /f "delims=" %%P in ('python -c "import clang,os;print(os.path.dirname(os.path.dirname(clang.__file__)).replace(chr(92),'/'))"') do set "CLANG_PY=%%P"
 set "LIBCLANG=%SRC:\=/%/third_party/llvm-build/Release+Asserts/bin/libclang.dll"
