@@ -1,0 +1,4 @@
+* text=auto
+*.patch -text
+*.cmd text eol=crlf
+series text eol=lf

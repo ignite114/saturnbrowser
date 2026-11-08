@@ -1,0 +1,199 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Sun, 8 Nov 2026 23:00:08 +0500
+Subject: [PATCH 2/3] Saturn: saturn:// internal URL scheme
+
+saturn:// is the user-facing name of chrome://. Internally pages stay
+chrome:// (WebUI, permissions, policies keep working); only the edges
+change:
+- saturn is a registered standard scheme so saturn://host/path parses.
+- Typed input (url_fixer) and browser navigations (BrowserURLHandler)
+  map saturn:// to chrome://.
+- url_formatter::FormatUrl shows chrome:// as saturn:// (omnibox,
+  history, bookmarks, page info...). Both names are 6 letters, so no
+  offset adjustments are needed.
+- Omnibox: saturn: input is a URL, builtin suggestions say saturn://.
+---
+ .../chrome_autocomplete_scheme_classifier.cc  |  1 +
+ .../browser/chrome_content_browser_client.cc  | 16 +++++++++++
+ chrome/common/chrome_content_client.cc        |  4 +++
+ .../omnibox/browser/builtin_provider.cc       | 27 ++++++++++++++-----
+ components/url_formatter/url_fixer.cc         | 16 ++++++-----
+ components/url_formatter/url_formatter.cc     |  5 ++++
+ 6 files changed, 57 insertions(+), 12 deletions(-)
+
+diff --git a/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc b/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc
+index a30df07..961d2b2 100644
+--- a/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc
++++ b/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc
+@@ -71,6 +71,7 @@ ChromeAutocompleteSchemeClassifier::GetInputTypeForScheme(
+   if (base::IsStringASCII(scheme) &&
+       (ProfileIOData::IsHandledProtocol(scheme) ||
+        base::EqualsCaseInsensitiveASCII(scheme, content::kViewSourceScheme) ||
++       base::EqualsCaseInsensitiveASCII(scheme, "saturn") ||
+        base::EqualsCaseInsensitiveASCII(scheme, url::kTraceScheme) ||
+        base::EqualsCaseInsensitiveASCII(scheme, url::kJavaScriptScheme) ||
+        base::EqualsCaseInsensitiveASCII(scheme, url::kDataScheme))) {
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 00fd21f..7e1a3ae 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -5173,8 +5173,24 @@ ChromeContentBrowserClient::GetForcedColorsForWebContents(
+       .forced_colors;
+ }
+ 
++// Saturn: turns saturn://foo into chrome://foo in place. Returns false so the
++// remaining handlers (chrome://help, WebUI checks, ...) still run on the
++// rewritten URL. Display goes the other way in url_formatter::FormatUrl.
++static bool HandleSaturnSchemeRewrite(GURL* url,
++                                      content::BrowserContext* context) {
++  if (url->SchemeIs("saturn")) {
++    GURL::Replacements replacements;
++    replacements.SetSchemeStr(content::kChromeUIScheme);
++    *url = url->ReplaceComponents(replacements);
++  }
++  return false;
++}
++
+ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+     BrowserURLHandler* handler) {
++  handler->AddHandlerPair(&HandleSaturnSchemeRewrite,
++                          BrowserURLHandler::null_handler());
++
+   // The group policy NTP URL handler must be registered before the other NTP
+   // URL handlers below. Also register it before the "parts" handlers, so the
+   // NTP policy takes precedence over extensions that override the NTP.
+diff --git a/chrome/common/chrome_content_client.cc b/chrome/common/chrome_content_client.cc
+index 601ff3c..b077820 100644
+--- a/chrome/common/chrome_content_client.cc
++++ b/chrome/common/chrome_content_client.cc
+@@ -205,6 +205,10 @@ static const char* const kChromeStandardURLSchemes[] = {
+ void ChromeContentClient::AddAdditionalSchemes(Schemes* schemes) {
+   for (auto* standard_scheme : kChromeStandardURLSchemes)
+     schemes->standard_schemes.push_back(standard_scheme);
++  // Saturn: saturn:// is the user-facing name of chrome://. It never loads
++  // anything itself; navigations are rewritten to chrome:// (see
++  // ChromeContentBrowserClient::BrowserURLHandlerCreated).
++  schemes->standard_schemes.push_back("saturn");
+ 
+ #if BUILDFLAG(IS_ANDROID)
+   schemes->referrer_schemes.push_back(content::kAndroidAppScheme);
+diff --git a/components/omnibox/browser/builtin_provider.cc b/components/omnibox/browser/builtin_provider.cc
+index ea54a7a..969c771 100644
+--- a/components/omnibox/browser/builtin_provider.cc
++++ b/components/omnibox/browser/builtin_provider.cc
+@@ -20,6 +20,11 @@
+ #include "third_party/metrics_proto/omnibox_input_type.pb.h"
+ #include "url/url_constants.h"
+ 
++namespace {
++constexpr std::u16string_view kSaturnDisplayPrefix = u"saturn://";
++constexpr std::u16string_view kChromeDisplayPrefix = u"chrome://";
++}  // namespace
++
+ const int BuiltinProvider::kRelevance = 860;
+ 
+ BuiltinProvider::BuiltinProvider(AutocompleteProviderClient* client)
+@@ -49,9 +54,9 @@ void BuiltinProvider::DoBuiltinAutocompletion(const std::u16string& text) {
+   const size_t kAboutSchemeLength = strlen(url::kAboutScheme);
+   const std::u16string kAbout =
+       base::StrCat({url::kAboutScheme16, url::kStandardSchemeSeparator16});
+-  const std::u16string embedderAbout = base::StrCat(
+-      {base::UTF8ToUTF16(client_->GetEmbedderRepresentationOfAboutScheme()),
+-       url::kStandardSchemeSeparator16});
++  // Saturn: builtin pages are offered as saturn://; the embedder's scheme
++  // (chrome) is still what FixupURL() produces and what we match against.
++  const std::u16string embedderAbout(kSaturnDisplayPrefix);
+ 
+   const int kUrl = ACMatchClassification::URL;
+   const int kMatch = kUrl | ACMatchClassification::MATCH;
+@@ -162,10 +167,20 @@ void BuiltinProvider::AddBuiltinMatch(const std::u16string& match_string,
+   AutocompleteMatch match(this, kRelevance, false,
+                           omnibox::AutocompleteMatchType::kNavsuggest);
+   match.suggest_type = omnibox::TYPE_NAVIGATION;
+-  match.fill_into_edit = match_string;
++  // Saturn: show saturn://foo, navigate to chrome://foo. Both prefixes have
++  // the same length, so |styles| and |inline_completion| stay valid.
++  std::u16string display = match_string;
++  std::u16string target = match_string;
++  if (base::StartsWith(display, kChromeDisplayPrefix)) {
++    display.replace(0, kChromeDisplayPrefix.size(), kSaturnDisplayPrefix);
++  }
++  if (base::StartsWith(target, kSaturnDisplayPrefix)) {
++    target.replace(0, kSaturnDisplayPrefix.size(), kChromeDisplayPrefix);
++  }
++  match.fill_into_edit = display;
+   match.inline_autocompletion = inline_completion;
+-  match.destination_url = GURL(match_string);
+-  match.contents = match_string;
++  match.destination_url = GURL(target);
++  match.contents = display;
+   match.contents_class = styles;
+   matches_.push_back(match);
+ }
+diff --git a/components/url_formatter/url_fixer.cc b/components/url_formatter/url_fixer.cc
+index dbbb011..4af3e6c 100644
+--- a/components/url_formatter/url_fixer.cc
++++ b/components/url_formatter/url_fixer.cc
+@@ -40,6 +40,8 @@ namespace {
+ 
+ // Hardcode these constants to avoid dependences on //chrome and //content.
+ const char kChromeUIScheme[] = "chrome";
++// Saturn: user-facing alias of chrome:, see FormatUrl().
++const char kSaturnScheme[] = "saturn";
+ const char kDevToolsScheme[] = "devtools";
+ const char kChromeUIDefaultHost[] = "version";
+ const char kViewSourceScheme[] = "view-source";
+@@ -447,7 +449,8 @@ std::string SegmentURLInternal(std::string* text, url::Parsed* parts) {
+       (*text)[semicolon] = ':';
+       if (GetValidScheme(*text, &parts->scheme, &scheme) &&
+           (url::IsStandard(scheme) || scheme == url::kAboutScheme ||
+-           scheme == kChromeUIScheme || scheme == url::kFileScheme)) {
++           scheme == kChromeUIScheme || scheme == kSaturnScheme ||
++           scheme == url::kFileScheme)) {
+         found_scheme = true;
+       } else {
+         (*text)[semicolon] = ';';
+@@ -463,7 +466,8 @@ std::string SegmentURLInternal(std::string* text, url::Parsed* parts) {
+   // Proceed with about, chrome, and devtools schemes,
+   // but not file or nonstandard schemes.
+   if ((scheme != url::kAboutScheme) && (scheme != kChromeUIScheme) &&
+-      (scheme != kDevToolsScheme) && !url::IsStandard(scheme)) {
++      (scheme != kSaturnScheme) && (scheme != kDevToolsScheme) &&
++      !url::IsStandard(scheme)) {
+     return scheme;
+   }
+ 
+@@ -619,12 +623,12 @@ GURL FixupURLInternal(const std::string& text,
+   }
+ 
+   // For some schemes whose layouts we understand, we rebuild the URL.
+-  bool chrome_url =
+-      (scheme == url::kAboutScheme) || (scheme == kChromeUIScheme);
++  bool chrome_url = (scheme == url::kAboutScheme) ||
++                    (scheme == kChromeUIScheme) || (scheme == kSaturnScheme);
+   bool devtools_url = (scheme == kDevToolsScheme);
+   if (chrome_url || devtools_url || url::IsStandard(scheme)) {
+-    // Replace the about: scheme with the chrome: scheme.
+-    std::string url(scheme == url::kAboutScheme ? kChromeUIScheme : scheme);
++    // Replace the about: and saturn: schemes with the chrome: scheme.
++    std::string url(chrome_url ? kChromeUIScheme : scheme);
+     url.append(url::kStandardSchemeSeparator);
+ 
+     // We need to check whether the |username| is valid because it is our
+diff --git a/components/url_formatter/url_formatter.cc b/components/url_formatter/url_formatter.cc
+index a440f4f..12d2f46 100644
+--- a/components/url_formatter/url_formatter.cc
++++ b/components/url_formatter/url_formatter.cc
+@@ -633,6 +633,11 @@ std::u16string FormatUrlWithAdjustments(
+       url::Parsed::USERNAME, true /* include_delimiter */));
+   std::u16string url_string;
+   url_string.insert(url_string.end(), spec.begin(), spec.begin() + scheme_size);
++  // Saturn: show chrome:// as saturn://. Both names are 6 characters, so no
++  // offset adjustments are needed. url_fixer maps saturn: back to chrome:.
++  if (url.SchemeIs("chrome")) {
++    url_string.replace(0, 6, u"saturn");
++  }
+   new_parsed->scheme = parsed.scheme;
+ 
+   // Username & password.

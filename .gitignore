@@ -1,0 +1,7 @@
+# Chromium/ungoogled trees are not part of this repo
+/ungoogled-chromium-windows/
+/release/
+/test-profile/
+*.log
+*.stdout
+__pycache__/

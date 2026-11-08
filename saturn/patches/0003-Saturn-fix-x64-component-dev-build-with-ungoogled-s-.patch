@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Sun, 8 Nov 2026 23:03:35 +0500
+Subject: [PATCH 3/3] Saturn: fix x64 component (dev) build with ungoogled's
+ clang
+
+The abseil DLL's export list names CordRepBtree::AddEdge<kFront>, which
+this toolchain always inlines, so lld-link fails with an undefined symbol.
+Drop that one export. Only component builds use these .def files; the
+release build is unaffected.
+---
+ third_party/abseil-cpp/symbols_x64_rel.def       | 1 -
+ third_party/abseil-cpp/symbols_x64_rel_cxx23.def | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/third_party/abseil-cpp/symbols_x64_rel.def b/third_party/abseil-cpp/symbols_x64_rel.def
+index f9756bc..666b31c 100644
+--- a/third_party/abseil-cpp/symbols_x64_rel.def
++++ b/third_party/abseil-cpp/symbols_x64_rel.def
+@@ -34,7 +34,6 @@ EXPORTS
+     ??$AddData@$00@CordRepBtree@cord_internal@absl@@CAPEAV012@PEAV012@V?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@_K@Z
+     ??$AddData@$0A@@CordRepBtree@cord_internal@absl@@AEAA?AV?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@V345@_K@Z
+     ??$AddData@$0A@@CordRepBtree@cord_internal@absl@@CAPEAV012@PEAV012@V?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@_K@Z
+-    ??$AddEdge@$00@CordRepBtree@cord_internal@absl@@QEAA?AUOpResult@012@_NPEAUCordRep@12@_K@Z
+     ??$AddEdge@$0A@@CordRepBtree@cord_internal@absl@@QEAA?AUOpResult@012@_NPEAUCordRep@12@_K@Z
+     ??$AllocateBackingArray@$07V?$allocator@D@__Cr@std@@@container_internal@absl@@YAPEAXPEAX_K@Z
+     ??$Append@V?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@$0A@@Cord@absl@@QEAAX$$QEAV?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@@Z
+diff --git a/third_party/abseil-cpp/symbols_x64_rel_cxx23.def b/third_party/abseil-cpp/symbols_x64_rel_cxx23.def
+index 01e8a6e..0c826fe 100644
+--- a/third_party/abseil-cpp/symbols_x64_rel_cxx23.def
++++ b/third_party/abseil-cpp/symbols_x64_rel_cxx23.def
+@@ -34,7 +34,6 @@ EXPORTS
+     ??$AddData@$00@CordRepBtree@cord_internal@absl@@CAPEAV012@PEAV012@V?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@_K@Z
+     ??$AddData@$0A@@CordRepBtree@cord_internal@absl@@AEAA?AV?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@V345@_K@Z
+     ??$AddData@$0A@@CordRepBtree@cord_internal@absl@@CAPEAV012@PEAV012@V?$basic_string_view@DU?$char_traits@D@__Cr@std@@@__Cr@std@@_K@Z
+-    ??$AddEdge@$00@CordRepBtree@cord_internal@absl@@QEAA?AUOpResult@012@_NPEAUCordRep@12@_K@Z
+     ??$AddEdge@$0A@@CordRepBtree@cord_internal@absl@@QEAA?AUOpResult@012@_NPEAUCordRep@12@_K@Z
+     ??$AllocateBackingArray@$07V?$allocator@D@__Cr@std@@@container_internal@absl@@YAPEAXPEAX_K@Z
+     ??$Append@V?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@$0A@@Cord@absl@@QEAAX$$QEAV?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@@Z

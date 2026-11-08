@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Sun, 8 Nov 2026 22:58:46 +0500
+Subject: [PATCH 1/3] Saturn: product branding
+
+Rename the product from Chromium to Saturn:
+- BRANDING: product, company and installer names, copyright, bundle id
+  (feeds the exe version resource and generated version headers).
+- install_static: user data dir is now %LOCALAPPDATA%\Saturn\User Data,
+  app name/id (taskbar grouping) and ProgIDs are Saturn's.
+
+UI strings (window title, menus, default profile name "Your Saturn") are
+rebranded by saturn/scripts/rebrand_strings.py, which also keeps their
+translations; it runs after this patch series.
+---
+ chrome/app/theme/chromium/BRANDING             | 16 ++++++++--------
+ chrome/install_static/chromium_install_modes.h | 14 +++++++-------
+ 2 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
+index f8363d5..f7e5b8b 100644
+--- a/chrome/app/theme/chromium/BRANDING
++++ b/chrome/app/theme/chromium/BRANDING
+@@ -1,10 +1,10 @@
+-COMPANY_FULLNAME=The Chromium Authors
+-COMPANY_SHORTNAME=The Chromium Authors
+-PRODUCT_FULLNAME=Chromium
+-PRODUCT_SHORTNAME=Chromium
+-PRODUCT_INSTALLER_FULLNAME=Chromium Installer
+-PRODUCT_INSTALLER_SHORTNAME=Chromium Installer
+-COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Chromium Authors. All rights reserved.
+-MAC_BUNDLE_ID=org.chromium.Chromium
++COMPANY_FULLNAME=Saturn
++COMPANY_SHORTNAME=Saturn
++PRODUCT_FULLNAME=Saturn
++PRODUCT_SHORTNAME=Saturn
++PRODUCT_INSTALLER_FULLNAME=Saturn Installer
++PRODUCT_INSTALLER_SHORTNAME=Saturn Installer
++COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Saturn Authors and The Chromium Authors. All rights reserved.
++MAC_BUNDLE_ID=org.saturn.Saturn
+ MAC_CREATOR_CODE=Cr24
+ MAC_TEAM_ID=
+diff --git a/chrome/install_static/chromium_install_modes.h b/chrome/install_static/chromium_install_modes.h
+index a6d969d..3f44018 100644
+--- a/chrome/install_static/chromium_install_modes.h
++++ b/chrome/install_static/chromium_install_modes.h
+@@ -21,7 +21,7 @@ inline constexpr wchar_t kCompanyPathName[] = L"";
+ 
+ // The brand-specific product name to be included as a component of the install
+ // and user data directory paths.
+-inline constexpr wchar_t kProductPathName[] = L"Chromium";
++inline constexpr wchar_t kProductPathName[] = L"Saturn";
+ 
+ // The brand-specific safe browsing client name.
+ inline constexpr char kSafeBrowsingName[] = "chromium";
+@@ -54,15 +54,15 @@ inline constexpr auto kInstallModes = std::to_array<InstallConstants>({
+         .logo_suffix = L"",  // No logo suffix for the primary install mode.
+         .app_guid =
+             L"",  // Empty app_guid since no integration with Google Update.
+-        .base_app_name = L"Chromium",              // A distinct base_app_name.
+-        .base_app_id = L"Chromium",                // A distinct base_app_id.
+-        .browser_prog_id_prefix = L"ChromiumHTM",  // Browser ProgID prefix.
++        .base_app_name = L"Saturn",                // A distinct base_app_name.
++        .base_app_id = L"Saturn",                  // A distinct base_app_id.
++        .browser_prog_id_prefix = L"SaturnHTM",    // Browser ProgID prefix.
+         .browser_prog_id_description =
+-            L"Chromium HTML Document",  // Browser ProgID description.
++            L"Saturn HTML Document",  // Browser ProgID description.
+         .direct_launch_url_scheme = "chromium",
+-        .pdf_prog_id_prefix = L"ChromiumPDF",  // PDF ProgID prefix.
++        .pdf_prog_id_prefix = L"SaturnPDF",    // PDF ProgID prefix.
+         .pdf_prog_id_description =
+-            L"Chromium PDF Document",  // PDF ProgID description.
++            L"Saturn PDF Document",  // PDF ProgID description.
+         .active_setup_guid =
+             L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}",  // Active Setup
+                                                         // GUID.

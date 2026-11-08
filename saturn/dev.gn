@@ -1,0 +1,44 @@
+# Saturn DEV build args (out\Dev). Fast incremental builds, not for release.
+# dev-build.cmd copies this to out\Dev\args.gn and appends the libclang paths.
+
+# --- dev speed settings ---
+is_official_build = false
+is_component_build = true
+is_debug = false
+dcheck_always_on = false
+symbol_level = 1
+blink_symbol_level = 0
+v8_symbol_level = 0
+chrome_pgo_phase = 0
+use_thin_lto = false
+
+# --- toolchain / platform (from flags.windows.gn) ---
+is_clang = true
+clang_version = "23"
+target_cpu = "x64"
+use_sysroot = false
+enable_rust = true
+rust_crubit_root = "//third_party/rust-toolchain/crubit"
+enable_swiftshader = false
+ffmpeg_branding = "Chrome"
+proprietary_codecs = true
+enable_mse_mpeg2ts_stream_parser = true
+
+# --- ungoogled-chromium privacy flags (ungoogled-chromium/flags.gn) ---
+clang_use_chrome_plugins = false
+disable_fieldtrial_testing_config = true
+enable_hangout_services_extension = false
+enable_mdns = false
+enable_remoting = false
+enable_reporting = false
+enable_service_discovery = false
+enable_widevine = true
+exclude_unwind_tables = true
+google_api_key = ""
+google_default_client_id = ""
+google_default_client_secret = ""
+safe_browsing_mode = 0
+treat_warnings_as_errors = false
+use_official_google_api_keys = false
+use_unofficial_version_number = false
+v8_drumbrake_bounds_checks = true
