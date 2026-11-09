@@ -122,6 +122,17 @@ Commit `saturn_dev` afterwards.
    space's window takes this window's place and this one minimizes) and +
    (new space via the profile picker). Rename a space in its profile
    settings. Strings are hard-coded English for now.
+7. **0007 sidebar matches Figma** (node 4126:990) – icons exported from Figma
+   (`saturn\figma-icons\*.svg`, converted with `saturn\scripts\svg_to_icon.py`
+   into `chrome/app/vector_icons/saturn_*.icon`); square buttons on white-5%
+   tiles. The window gets a DWM **acrylic** backdrop (blurs what's behind it;
+   needs Windows 11 with transparency effects on) and the sidebar is #161616
+   at 80% over it; the title bar stays opaque. **Inter** and **JetBrains Mono**
+   (`saturn\fonts`, OFL) ship in `saturn_fonts\` next to the binaries, are
+   sideloaded into DirectWrite at startup, and Inter becomes the default UI
+   font. The app menu opens from the bottom-left settings button; the
+   sliders button opens site settings (page info); the URL pill drops the
+   location icon and gets a copy-link button; Figma window controls.
 
 ## Monthly update (release build)
 

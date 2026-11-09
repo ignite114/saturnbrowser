@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Mon, 9 Nov 2026 12:22:53 +0500
-Subject: [PATCH 5/6] Saturn: sidebar phase 2 - favorites grid, Clear, New tab
+Subject: [PATCH 5/7] Saturn: sidebar phase 2 - favorites grid, Clear, New tab
  row
 
 While the sidebar is expanded, pinned tabs form a 3-column favorites grid
