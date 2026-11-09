@@ -140,6 +140,20 @@ Commit `saturn_dev` afterwards.
    `ui/gfx/font_render_params_win.cc` (browser UI, GPU, renderer prefs) and
    blink's `win/font_platform_data_win.cc` (web pages); ignores the system
    ClearType settings.
+9. **0009 sidebar polish** – sidebar text is Inter Medium 13px; 5px between
+   tabs; rows get white 5% on hover (active row 20%); the close button (Figma
+   glyph, `saturn_close_tab.icon`) shows only on the hovered row, 5px from its
+   right edge. The space name is gone; the divider and Clear show only while
+   the cursor is over the sidebar; the sidebar and its toolbar no longer drag
+   the window (only the title bar does). The URL pill (Figma 4097:356,
+   `toolbar/saturn_url_pill.cc`) shows the domain ("youtube.com") and a copy
+   button; `LocationBarView` stays laid out under it, invisible, so bubbles
+   keep their anchors. Clicking the pill, Ctrl+L, or **New tab** opens a URL
+   popup centered over the page (Enter navigates — New tab opens a tab only
+   then; Esc or clicking away cancels). Closing the last tab leaves the window
+   open on a blank page. Dragging a tab over the favorites shows an outlined
+   empty tile and pins it on drop; over the Pinned list it shows an outlined
+   row and moves the page into the list (the tab closes; the row reopens it).
 
 ## Monthly update (release build)
 

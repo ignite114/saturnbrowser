@@ -1,0 +1,1375 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Tue, 10 Nov 2026 03:03:21 +0500
+Subject: [PATCH 9/9] Saturn: sidebar polish - URL pill and popup, hover-only
+ close, drag to favorites
+
+13px Inter Medium everywhere; 5px between tabs; row hover white 5%;
+close button (Figma glyph) only on hover, 5px from the right edge.
+No space name; divider and Clear only while the cursor is over the
+sidebar; the sidebar no longer drags the window. URL pill per Figma
+4097:356 (domain only + copy button); clicking it, Ctrl+L, or New tab
+opens a centered URL popup (Enter navigates, Esc cancels). Closing the
+last tab keeps the window on a blank page. Dragging a tab over the
+favorites shows an outlined slot and pins it; over the Pinned list it
+moves the page into the list.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chrome/app/vector_icons/BUILD.gn              |   1 +
+ chrome/app/vector_icons/saturn_close_tab.icon |  13 +
+ chrome/browser/ui/tabs/tab_strip_model.cc     |  10 +
+ .../views/frame/base_tab_strip_region_view.cc |   1 +
+ .../views/frame/base_tab_strip_region_view.h  |   4 +
+ chrome/browser/ui/views/frame/browser_view.cc |  30 +-
+ .../ui/views/frame/saturn_sidebar_constants.h |   4 +-
+ .../frame/vertical_tab_strip_region_view.cc   | 236 ++++++++++--
+ .../frame/vertical_tab_strip_region_view.h    |   8 +
+ .../tabs/common/pinned_tab_container_view.cc  |  52 ++-
+ .../tabs/common/pinned_tab_container_view.h   |   8 +
+ .../ui/views/tabs/common/tab_drag_handler.cc  |   8 +
+ .../ui/views/tabs/common/tab_drag_handler.h   |   5 +
+ .../tabs/common/tab_view_vertical_layout.cc   |  27 +-
+ .../unpinned_tab_container_view_layout.cc     |   2 +-
+ .../tabs/common/vertical_tab_style_views.cc   |   7 +-
+ .../ui/views/tabs/tab/tab_close_button.cc     |  19 +-
+ chrome/browser/ui/views/toolbar/BUILD.gn      |   2 +
+ .../ui/views/toolbar/saturn_url_pill.cc       | 363 ++++++++++++++++++
+ .../ui/views/toolbar/saturn_url_pill.h        |  56 +++
+ .../browser/ui/views/toolbar/toolbar_view.cc  |  31 +-
+ .../browser/ui/views/toolbar/toolbar_view.h   |   3 +
+ 22 files changed, 821 insertions(+), 69 deletions(-)
+ create mode 100644 chrome/app/vector_icons/saturn_close_tab.icon
+ create mode 100644 chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+ create mode 100644 chrome/browser/ui/views/toolbar/saturn_url_pill.h
+
+diff --git a/chrome/app/vector_icons/BUILD.gn b/chrome/app/vector_icons/BUILD.gn
+index 4c14910..d7ee91d 100644
+--- a/chrome/app/vector_icons/BUILD.gn
++++ b/chrome/app/vector_icons/BUILD.gn
+@@ -115,6 +115,7 @@ aggregate_vector_icons("chrome_vector_icons") {
+     "dock_to_left.icon",
+     "saturn_back.icon",
+     "saturn_clear.icon",
++    "saturn_close_tab.icon",
+     "saturn_forward.icon",
+     "saturn_link.icon",
+     "saturn_new_tab.icon",
+diff --git a/chrome/app/vector_icons/saturn_close_tab.icon b/chrome/app/vector_icons/saturn_close_tab.icon
+new file mode 100644
+index 0000000..7caa8c1
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_close_tab.icon
+@@ -0,0 +1,13 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 5.0448f, 14.9453f,
++LINE_TO, 14.9443f, 5.0458f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 14.9454f, 14.9551f,
++LINE_TO, 5.0459f, 5.0556f,
+diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
+index 531960b..9286675 100644
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ 
++#include "url/gurl.h"
++#include "url/url_constants.h"
++
+ #include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+@@ -4050,6 +4053,13 @@ void TabStripModel::CloseTabs(base::span<content::WebContents* const> items,
+     return;
+   }
+ 
++  // Saturn: closing the last tab keeps the window open on an empty page
++  // (closing the window itself goes through CloseAllTabs()).
++  if (static_cast<int>(filtered_items.size()) == count() && !closing_all_ &&
++      delegate_->IsNormalWindow() && !delegate_->IsForWebApp()) {
++    delegate_->AddTabAt(GURL(url::kAboutBlankURL), -1, /*foreground=*/true);
++  }
++
+   const bool closing_all = static_cast<int>(filtered_items.size()) == count();
+   base::WeakPtr<TabStripModel> ref = weak_factory_.GetWeakPtr();
+   if (closing_all) {
+diff --git a/chrome/browser/ui/views/frame/base_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/base_tab_strip_region_view.cc
+index e4a6ae5..0385b82 100644
+--- a/chrome/browser/ui/views/frame/base_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/base_tab_strip_region_view.cc
+@@ -408,6 +408,7 @@ TabDragTarget* BaseTabStripRegionView::GetTabDragTarget(
+   if (!drag_handler_) {
+     return nullptr;
+   }
++  SaturnOnTabDragMoved(point_in_screen);
+   gfx::Rect tab_strip_draggable_bounds = GetTabStripDraggableBounds();
+   if (!tab_strip_draggable_bounds.Contains(point_in_screen)) {
+     return nullptr;
+diff --git a/chrome/browser/ui/views/frame/base_tab_strip_region_view.h b/chrome/browser/ui/views/frame/base_tab_strip_region_view.h
+index 1e5f4fd..ca1b987 100644
+--- a/chrome/browser/ui/views/frame/base_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/base_tab_strip_region_view.h
+@@ -131,6 +131,9 @@ class BaseTabStripRegionView : public TabStripRegionView,
+   void RecordNewTabButtonPressed();
+   virtual void OnActiveTabChanged(const tabs::TabInterface* active_tab);
+ 
++  // Saturn: told where a tab drag is, every drag step.
++  virtual void SaturnOnTabDragMoved(const gfx::Point& point_in_screen) {}
++
+   void SetLinkDropArrow(const std::optional<BrowserRootView::DropIndex>& index);
+   virtual gfx::Point GetLinkDropArrowPosition(
+       const BrowserRootView::DropIndex& drop_index,
+@@ -145,6 +148,7 @@ class BaseTabStripRegionView : public TabStripRegionView,
+   actions::ActionItem* root_action_item() const { return root_action_item_; }
+   TabStripModel* tab_strip_model() const { return tab_strip_model_; }
+   TabStripView* tab_strip_view() const { return tab_strip_view_; }
++  TabDragHandler* saturn_drag_handler() const { return drag_handler_; }
+   DropArrow* drop_arrow() const { return drop_arrow_.get(); }
+   TabHoverCardController* hover_card_controller() const {
+     return hover_card_controller_.get();
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 928a723..d5ed9e3 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ 
++#include "chrome/browser/ui/views/toolbar/saturn_url_pill.h"
++#include "components/url_formatter/url_formatter.h"
+ #include <stdint.h>
+ 
+ #include <algorithm>
+@@ -2364,6 +2366,22 @@ void BrowserView::SetFocusToLocationBar(bool is_user_initiated) {
+     return;
+   }
+ 
++  // Saturn: in the sidebar layout the location bar is hidden behind the URL
++  // pill; Ctrl+L / F6 open the URL popup on the current page instead.
++  if (is_user_initiated && toolbar_ && ShouldDrawVerticalTabStrip() &&
++      !IsVerticalTabStripCollapsed() && !IsFullscreen()) {
++    content::WebContents* const contents = GetActiveWebContents();
++    ShowSaturnUrlPopup(
++        this,
++        contents ? url_formatter::FormatUrl(
++                       contents->GetVisibleURL(),
++                       url_formatter::kFormatUrlOmitNothing,
++                       base::UnescapeRule::NONE, nullptr, nullptr, nullptr)
++                 : std::u16string(),
++        /*new_tab=*/false);
++    return;
++  }
++
+   LocationBar* location_bar = GetLocationBar();
+   location_bar->FocusLocation(is_user_initiated,
+                               /*clear_focus_if_failed=*/true);
+@@ -4721,12 +4739,12 @@ int BrowserView::NonClientHitTest(const gfx::Point& point) {
+     gfx::Point test_point(point);
+     if (ConvertedHitTest(parent(), vertical_tab_strip_region_view_,
+                          &test_point)) {
+-      if (vertical_tab_strip_region_view_->IsPositionInWindowCaption(
+-              test_point)) {
+-        // We return HTNOWHERE so that the caller will hit-test the window
+-        // controls before finally falling back to HTCAPTION.
+-        return HTNOWHERE;
+-      }
++      // Saturn: the sidebar never drags the window; only the title bar does.
++      return HTCLIENT;
++    } else if (gfx::Point toolbar_point(point);
++               toolbar_ && toolbar_->GetVisible() &&
++               ConvertedHitTest(parent(), toolbar_, &toolbar_point)) {
++      // Saturn: the toolbar sits in the sidebar; it doesn't drag either.
+       return HTCLIENT;
+     } else {
+       gfx::Point test_point2(point);
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+index 8de7a35..6c953c9 100644
+--- a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -77,9 +77,9 @@ inline constexpr int kSidebarTileRadius = 10;
+ inline constexpr SkColor kUrlPillColor = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
+ 
+ // Fonts from the design (bundled, see gfx::InitializeFonts()): sidebar rows
+-// are Inter Medium 14px; the title bar and space name JetBrains Mono 12px.
++// are Inter Medium 13px; the title bar and space name JetBrains Mono 12px.
+ inline gfx::FontList SidebarFont() {
+-  return gfx::FontList({"Inter"}, gfx::Font::NORMAL, 14,
++  return gfx::FontList({"Inter"}, gfx::Font::NORMAL, 13,
+                        gfx::Font::Weight::MEDIUM);
+ }
+ inline gfx::FontList MonoFont() {
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 0225216..3c076de 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -119,6 +119,9 @@
+ #include "ui/views/layout/flex_layout_view.h"
+ #include "ui/views/layout/layout_types.h"
+ #include "ui/views/layout/proposed_layout.h"
++#include "chrome/browser/ui/views/toolbar/saturn_url_pill.h"
++#include "ui/events/event_observer.h"
++#include "ui/views/event_monitor.h"
+ #include "ui/views/view.h"
+ #include "ui/views/view_class_properties.h"
+ #include "ui/views/view_utils.h"
+@@ -148,25 +151,6 @@ void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
+   }
+ }
+ 
+-// Saturn: name of the current space (profile). The initial profile shows as
+-// "Primary" until the user renames it.
+-std::u16string SaturnSpaceName(Profile* profile) {
+-  if (!g_browser_process->profile_manager()) {
+-    return u"Primary";
+-  }
+-  const base::FilePath path = profile->GetOriginalProfile()->GetPath();
+-  ProfileAttributesEntry* const entry = g_browser_process->profile_manager()
+-                                            ->GetProfileAttributesStorage()
+-                                            .GetProfileAttributesWithPath(path);
+-  if (!entry || (entry->IsUsingDefaultName() &&
+-                 path.BaseName().value() ==
+-                     base::FilePath::FromASCII(chrome::kInitialProfile)
+-                         .value())) {
+-    return u"Primary";
+-  }
+-  return entry->GetLocalProfileName();
+-}
+-
+ // Saturn: spaces are profiles (separate cookies, favorites, Pinned list).
+ // Switching shows the target space's window where this one was and minimizes
+ // this one.
+@@ -393,23 +377,6 @@ class SaturnPinnedList : public views::View,
+ BEGIN_METADATA(SaturnPinnedList)
+ END_METADATA
+ 
+-// Saturn: the space's name above the favorites grid.
+-class SaturnSpaceLabel : public views::Label {
+-  METADATA_HEADER(SaturnSpaceLabel, views::Label)
+-
+- public:
+-  explicit SaturnSpaceLabel(BrowserWindowInterface* browser)
+-      : views::Label(SaturnSpaceName(browser->GetProfile())) {
+-    SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-    SetFontList(saturn::MonoFont());
+-    SetAutoColorReadabilityEnabled(false);
+-    SetEnabledColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
+-  }
+-};
+-
+-BEGIN_METADATA(SaturnSpaceLabel)
+-END_METADATA
+-
+ // Saturn: one dot per space; the current space is bright. Click switches.
+ class SaturnSpaceDots : public views::View,
+                         public ProfileAttributesStorage::Observer {
+@@ -584,7 +551,7 @@ END_METADATA
+ 
+ // Saturn: the block above today's tabs: the space's Pinned list, a divider
+ // with "Clear" on the right, then a "New tab" row (shown while expanded).
+-class SaturnTodayHeader : public views::View {
++class SaturnTodayHeader : public views::View, public ui::EventObserver {
+   METADATA_HEADER(SaturnTodayHeader, views::View)
+ 
+  public:
+@@ -617,28 +584,88 @@ class SaturnTodayHeader : public views::View {
+         browser, saturn::kTodayNewTabHeight,
+         GetLayoutConstant(LayoutConstant::kVerticalTabStripButtonIconSize));
+     new_tab->SetShouldShowLabel(true);
++    // Saturn: "New tab" asks for a URL or search first; the tab is created
++    // only when the popup is confirmed with Enter.
++    new_tab->SetCallback(base::BindRepeating(
++        [](BrowserWindowInterface* browser) {
++          ShowSaturnUrlPopup(BrowserView::GetBrowserViewForBrowser(browser),
++                             std::u16string(), /*new_tab=*/true);
++        },
++        base::Unretained(browser)));
+     new_tab->SetPaintTransparent(true);
+     SaturnSetLabelFont(new_tab.get());
+     new_tab_ = AddChildView(std::move(new_tab));
+     new_tab_->layer()->SetOpacity(0.4f);
++
++    // The divider and Clear show only while the cursor is over the sidebar.
++    divider_->SetVisible(false);
++    clear_->SetVisible(false);
++  }
++
++  // views::View:
++  void AddedToWidget() override {
++    event_monitor_ = views::EventMonitor::CreateWindowMonitor(
++        this, GetWidget()->GetNativeWindow(),
++        {ui::EventType::kMouseMoved, ui::EventType::kMouseEntered,
++         ui::EventType::kMouseExited, ui::EventType::kMouseDragged});
++  }
++  void RemovedFromWidget() override { event_monitor_.reset(); }
++
++  // ui::EventObserver:
++  void OnEvent(const ui::Event& event) override {
++    UpdateHoverChrome();
+   }
+ 
+   // views::View:
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+-    return gfx::Size(0, PinnedListHeight() + saturn::kTodayHeaderHeight);
++    return gfx::Size(
++        0, PinnedListHeight() + HintHeight() + saturn::kTodayHeaderHeight);
+   }
+ 
+   void ChildPreferredSizeChanged(views::View* child) override {
+     PreferredSizeChanged();
+   }
+ 
++  // Saturn: height of the Pinned list drop zone (the list and the divider
++  // row below it).
++  int PinnedDropZoneHeight() const {
++    return PinnedListHeight() + HintHeight() +
++           saturn::kTodayDividerRowHeight;
++  }
++
++  // Shows an outlined empty row at the end of the Pinned list.
++  void SetPinnedDropHint(bool show) {
++    if (pinned_hint_ == show) {
++      return;
++    }
++    pinned_hint_ = show;
++    PreferredSizeChanged();
++    InvalidateLayout();
++    SchedulePaint();
++  }
++
++  void OnPaint(gfx::Canvas* canvas) override {
++    views::View::OnPaint(canvas);
++    if (!pinned_hint_) {
++      return;
++    }
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setStyle(cc::PaintFlags::kStroke_Style);
++    flags.setStrokeWidth(1.5f);
++    flags.setColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
++    gfx::RectF r(0, PinnedListHeight(), width(), saturn::kPinnedRowHeight);
++    r.Inset(0.75f);
++    canvas->DrawRoundRect(r, saturn::kSidebarTileRadius, flags);
++  }
++
+   void Layout(PassKey) override {
+     const int w = width();
+     const int list_h = PinnedListHeight();
+     pinned_list_->SetBounds(0, 0, w,
+                             pinned_list_->GetPreferredSize().height());
+-    const int top = list_h;
++    const int top = list_h + HintHeight();
+     const int row = saturn::kTodayDividerRowHeight;
+     clear_->SetBounds(std::max(0, w - saturn::kTodayClearWidth), top,
+                       std::min(w, saturn::kTodayClearWidth), row);
+@@ -649,6 +676,35 @@ class SaturnTodayHeader : public views::View {
+   }
+ 
+  private:
++  // Shows the divider and Clear while the cursor is inside the sidebar
++  // (the strip region view plus the toolbar above it, full window height).
++  void UpdateHoverChrome() {
++    const views::View* sidebar = this;
++    for (const views::View* v = parent(); v; v = v->parent()) {
++      if (views::IsViewClass<VerticalTabStripRegionView>(v)) {
++        sidebar = v;
++        break;
++      }
++    }
++    const gfx::Rect sidebar_rect = sidebar->GetBoundsInScreen();
++    const gfx::Rect window_rect = GetWidget()->GetWindowBoundsInScreen();
++    const gfx::Point cursor =
++        display::Screen::Get()->GetCursorScreenPoint();
++    const bool inside = cursor.x() >= sidebar_rect.x() &&
++                        cursor.x() < sidebar_rect.right() &&
++                        window_rect.Contains(cursor);
++    if (inside != clear_->GetVisible()) {
++      divider_->SetVisible(inside);
++      clear_->SetVisible(inside);
++    }
++  }
++
++  int HintHeight() const {
++    return pinned_hint_
++               ? saturn::kPinnedRowHeight + saturn::kPinnedListBottomGap
++               : 0;
++  }
++
+   int PinnedListHeight() const {
+     const int h = pinned_list_->GetPreferredSize().height();
+     return h ? h + saturn::kPinnedListBottomGap : 0;
+@@ -658,6 +714,8 @@ class SaturnTodayHeader : public views::View {
+   raw_ptr<views::View> divider_ = nullptr;
+   raw_ptr<views::LabelButton> clear_ = nullptr;
+   raw_ptr<shared::NewTabButton> new_tab_ = nullptr;
++  std::unique_ptr<views::EventMonitor> event_monitor_;
++  bool pinned_hint_ = false;
+ };
+ 
+ BEGIN_METADATA(SaturnTodayHeader)
+@@ -1456,6 +1514,104 @@ void VerticalTabStripRegionView::RegionViewFocusListener::OnDidChangeFocus(
+   }
+ }
+ 
++int VerticalTabStripRegionView::SaturnDropZoneAt(
++    const gfx::Point& point_in_screen) const {
++  TabDragHandler* const handler = saturn_drag_handler();
++  TabStripView* const strip = tab_strip_view();
++  if (!handler || !strip || handler->IsDraggingPinnedTabs() ||
++      handler->IsDraggingGroups()) {
++    return 0;
++  }
++  auto* const header =
++      views::AsViewClass<SaturnTodayHeader>(strip->saturn_today_header());
++  if (!header || !header->IsDrawn() ||
++      !GetBoundsInScreen().Contains(point_in_screen)) {
++    return 0;
++  }
++  const gfx::Rect header_bounds = header->GetBoundsInScreen();
++  if (point_in_screen.y() < header_bounds.y()) {
++    return 1;
++  }
++  if (point_in_screen.y() <
++      header_bounds.y() + header->PinnedDropZoneHeight()) {
++    return 2;
++  }
++  return 0;
++}
++
++void VerticalTabStripRegionView::SaturnSetDropZone(int zone) {
++  if (saturn_drop_zone_ == zone) {
++    return;
++  }
++  saturn_drop_zone_ = zone;
++  if (auto* const pinned = GetPinnedTabsContainer()) {
++    pinned->SetSaturnDropSlot(zone == 1);
++  }
++  if (TabStripView* const strip = tab_strip_view()) {
++    if (auto* const header = views::AsViewClass<SaturnTodayHeader>(
++            strip->saturn_today_header())) {
++      header->SetPinnedDropHint(zone == 2);
++    }
++  }
++}
++
++void VerticalTabStripRegionView::SaturnOnTabDragMoved(
++    const gfx::Point& point_in_screen) {
++  if (TabDragHandler* const handler = saturn_drag_handler()) {
++    handler->SetSaturnDragStoppedCallback(
++        base::BindRepeating(&VerticalTabStripRegionView::SaturnOnTabDragStopped,
++                            base::Unretained(this)));
++  }
++  SaturnSetDropZone(SaturnDropZoneAt(point_in_screen));
++}
++
++void VerticalTabStripRegionView::SaturnOnTabDragStopped() {
++  // Only act if the tab was let go over the zone that is highlighted.
++  int zone = 0;
++  if (saturn_drop_zone_ != 0 &&
++      SaturnDropZoneAt(display::Screen::Get()->GetCursorScreenPoint()) ==
++          saturn_drop_zone_) {
++    zone = saturn_drop_zone_;
++  }
++  SaturnSetDropZone(0);
++  tabs::TabInterface* const tab =
++      zone ? tab_strip_model()->GetActiveTab() : nullptr;
++  if (!tab) {
++    return;
++  }
++  // The drag controller is still tearing down; act once it is done.
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](tabs::TabHandle handle, int zone) {
++            tabs::TabInterface* const tab = handle.Get();
++            if (!tab || !tab->GetBrowserWindowInterface()) {
++              return;
++            }
++            TabStripModel* const model =
++                tab->GetBrowserWindowInterface()->GetTabStripModel();
++            const int index = model->GetIndexOfTab(tab);
++            if (index == TabStripModel::kNoTab) {
++              return;
++            }
++            if (zone == 1) {
++              // Favorites: pin it (it lands at the end of the grid).
++              model->SetTabPinned(index, true);
++              return;
++            }
++            // Pinned list: the page moves into the list (a bookmark in the
++            // space's Pinned folder); clicking the row reopens it.
++            content::WebContents* const contents = tab->GetContents();
++            saturn::AddToPinned(
++                BookmarkModelFactory::GetForBrowserContext(
++                    contents->GetBrowserContext()),
++                contents->GetTitle(), contents->GetLastCommittedURL());
++            model->CloseWebContentsAt(index,
++                                      TabCloseTypes::CLOSE_USER_GESTURE);
++          },
++          tab->GetHandle(), zone));
++}
++
+ void VerticalTabStripRegionView::AddTabStripView(
+     std::unique_ptr<views::View> view) {
+   // Saturn: give the strip its "today" header (Clear + New tab row).
+@@ -1463,8 +1619,6 @@ void VerticalTabStripRegionView::AddTabStripView(
+       strip && !strip->saturn_today_header()) {
+     strip->SetSaturnTodayHeader(
+         std::make_unique<SaturnTodayHeader>(browser_view()->browser()));
+-    strip->SetSaturnSpaceLabel(
+-        std::make_unique<SaturnSpaceLabel>(browser_view()->browser()));
+   }
+   view->SetProperty(
+       views::kFlexBehaviorKey,
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index d8583cd..db3cb99 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -185,6 +185,7 @@ class VerticalTabStripRegionView final
+   void HandleMouseExited();
+ 
+   void AddTabStripView(std::unique_ptr<views::View> view) override;
++  void SaturnOnTabDragMoved(const gfx::Point& point_in_screen) override;
+   std::unique_ptr<views::View> RemoveTabStripView(views::View* view) override;
+ 
+   void OnCollapseStateChanged(
+@@ -292,6 +293,13 @@ class VerticalTabStripRegionView final
+   base::OneShotTimer mouse_exit_timer_;
+ 
+   base::CallbackListSubscription paint_as_active_subscription_;
++
++  // Saturn: Arc-style drop targets while a tab is dragged: 1 = favorites,
++  // 2 = Pinned list, 0 = none.
++  int SaturnDropZoneAt(const gfx::Point& point_in_screen) const;
++  void SaturnSetDropZone(int zone);
++  void SaturnOnTabDragStopped();
++  int saturn_drop_zone_ = 0;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_
+diff --git a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+index 40d83ea..0ed0e3b 100644
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+ 
++#include "cc/paint/paint_flags.h"
++
++#include "ui/gfx/canvas.h"
++
+ #include "base/i18n/rtl.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
+@@ -387,8 +391,26 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+   int y = 0;
+   int children_on_row = children.size();
+ 
++  // Saturn: the outlined "drop here" slot after the last favorite.
++  saturn_drop_slot_rect_ = gfx::Rect();
++  if (saturn_grid && saturn_drop_slot_ && size_bounds.width().is_bounded()) {
++    constexpr int kCols = saturn::kFavoritesColumns;
++    const int tile_w =
++        (size_bounds.width().value() -
++         GetLayoutConstant(LayoutConstant::kVerticalTabStripHorizontalPadding) -
++         saturn::kFavoritesGap * (kCols - 1)) /
++        kCols;
++    const int n = children.size();
++    saturn_drop_slot_rect_ = gfx::Rect(
++        (n % kCols) * (tile_w + saturn::kFavoritesGap),
++        (n / kCols) * (saturn::kFavoritesTileHeight + saturn::kFavoritesGap),
++        std::max(0, tile_w), saturn::kFavoritesTileHeight);
++  }
++
+   if (children_on_row == 0) {
+-    layouts.host_size = gfx::Size(0, 0);
++    layouts.host_size = gfx::Size(
++        saturn_drop_slot_rect_.IsEmpty() ? 0 : size_bounds.width().value(),
++        saturn_drop_slot_rect_.bottom());
+     return layouts;
+   }
+ 
+@@ -480,9 +502,35 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+   // Changes in host width can be interpreted as a resize and animations may
+   // otherwise snap to target.
+   layouts.host_size =
+-      gfx::Size(size_bounds.width().value_or(total_width), total_height);
++      gfx::Size(size_bounds.width().value_or(total_width),
++                std::max(total_height, saturn_drop_slot_rect_.bottom()));
+   return layouts;
+ }
+ 
++void PinnedTabContainerView::SetSaturnDropSlot(bool show) {
++  if (saturn_drop_slot_ == show) {
++    return;
++  }
++  saturn_drop_slot_ = show;
++  InvalidateLayout();
++  PreferredSizeChanged();
++  SchedulePaint();
++}
++
++void PinnedTabContainerView::OnPaint(gfx::Canvas* canvas) {
++  TabCollectionZOrderManager::OnPaint(canvas);
++  if (!saturn_drop_slot_ || saturn_drop_slot_rect_.IsEmpty()) {
++    return;
++  }
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setStyle(cc::PaintFlags::kStroke_Style);
++  flags.setStrokeWidth(1.5f);
++  flags.setColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
++  gfx::RectF r(saturn_drop_slot_rect_);
++  r.Inset(0.75f);
++  canvas->DrawRoundRect(r, saturn::kSidebarTileRadius, flags);
++}
++
+ BEGIN_METADATA(PinnedTabContainerView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+index 60e3195..c8618b2 100644
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -50,7 +50,15 @@ class PinnedTabContainerView
+   std::optional<BrowserRootView::DropIndex> GetLinkDropIndex(
+       const gfx::Point& loc_in_container);
+ 
++  // Saturn: while a tab is dragged over the favorites, reserve the next grid
++  // slot and draw it as an outlined, empty tile.
++  void SetSaturnDropSlot(bool show);
++  void OnPaint(gfx::Canvas* canvas) override;
++
+  private:
++  bool saturn_drop_slot_ = false;
++  mutable gfx::Rect saturn_drop_slot_rect_;
++
+   // DraggedTabsContainer:
+   views::ScrollView* GetScrollViewForContainer() const override;
+   void UpdateTargetLayoutForDrag(
+diff --git a/chrome/browser/ui/views/tabs/common/tab_drag_handler.cc b/chrome/browser/ui/views/tabs/common/tab_drag_handler.cc
+index 20c6e0b..637f4b8 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_drag_handler.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_drag_handler.cc
+@@ -796,9 +796,17 @@ void TabDragHandlerImpl::DraggedTabsDetached() {
+   scroll_synchronizers_.clear();
+ }
+ 
++void TabDragHandlerImpl::SetSaturnDragStoppedCallback(
++    base::RepeatingClosure callback) {
++  saturn_drag_stopped_callback_ = std::move(callback);
++}
++
+ void TabDragHandlerImpl::StoppedDragging() {
+   expand_on_hover_lock_.reset();
+   scroll_synchronizers_.clear();
++  if (saturn_drag_stopped_callback_) {
++    saturn_drag_stopped_callback_.Run();
++  }
+ 
+   for (auto& [_, slot_view] : slot_views_) {
+     views::View* dragged_view = ViewFromTabSlot(slot_view);
+diff --git a/chrome/browser/ui/views/tabs/common/tab_drag_handler.h b/chrome/browser/ui/views/tabs/common/tab_drag_handler.h
+index c576d9b..5238485 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_drag_handler.h
++++ b/chrome/browser/ui/views/tabs/common/tab_drag_handler.h
+@@ -107,6 +107,9 @@ class TabDragHandler {
+   // Called before a tab is removed from the tabstrip. Cancels the current drag
+   // if the tab is one of the dragged tabs.
+   virtual void OnTabWillBeRemoved(content::WebContents* contents) = 0;
++
++  // Saturn: runs when a tab drag stops (dropped or cancelled).
++  virtual void SetSaturnDragStoppedCallback(base::RepeatingClosure callback) {}
+ };
+ 
+ // Implements a minimal drag context to interact with the central
+@@ -173,6 +176,7 @@ class TabDragHandlerImpl : public TabDragHandler,
+   void StartedDragging(const std::vector<TabSlotView*>& views) override;
+   void DraggedTabsDetached() override;
+   void StoppedDragging() override;
++  void SetSaturnDragStoppedCallback(base::RepeatingClosure callback) override;
+   void SetDragControllerCallbackForTesting(
+       base::OnceCallback<void(TabDragController*)> callback) override;
+   TabDragPositioningDelegate* GetPositioningDelegate() override;
+@@ -188,6 +192,7 @@ class TabDragHandlerImpl : public TabDragHandler,
+   void OnDragExited() override;
+ 
+  private:
++  base::RepeatingClosure saturn_drag_stopped_callback_;
+   // Encapsulates data needed to initialize a drag session.
+   struct DragInitData {
+     STACK_ALLOCATED();
+diff --git a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+index 887adac..d25bbe8 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -96,6 +96,29 @@ views::ProposedLayout TabViewVerticalLayout::CalculateProposedLayout(
+     }
+   }
+ 
++  // Saturn: the close glyph (20px, centered in its 28px target) sits 5px
++  // from the row's right edge; the title stops 4px before it.
++  if (!is_centered) {
++    constexpr int kCloseGlyph = 20;
++    constexpr int kCloseRightGap = 5;
++    views::ChildLayout* close = nullptr;
++    views::ChildLayout* title = nullptr;
++    for (auto& cl : layouts.child_layouts) {
++      if (cl.child_view == TabView().close_button_) close = &cl;
++      if (cl.child_view == TabView().title_) title = &cl;
++    }
++    if (close && close->visible && !close->bounds.IsEmpty()) {
++      const int target = close->bounds.width();
++      const int x = width - kCloseRightGap - kCloseGlyph -
++                    (target - kCloseGlyph) / 2;
++      close->bounds.set_x(x);
++      if (title && title->bounds.right() > x + (target - kCloseGlyph) / 2 - 4) {
++        title->bounds.set_width(std::max(
++            0, x + (target - kCloseGlyph) / 2 - 4 - title->bounds.x()));
++      }
++    }
++  }
++
+   if (TabView().glic_tab_underline_view_) {
+     const gfx::Rect glic_bounds =
+         gfx::Rect(0, 0, 2 * glic::TabUnderlineView::kEffectThickness, height);
+@@ -191,7 +214,9 @@ bool TabViewVerticalLayout::IsChildVisible(const views::View* child_view,
+       return TabView().active_ && hovered_or_focused;
+     }
+ 
+-    return TabView().active_ || hovered_or_focused;
++    // Saturn: only the hovered (or keyboard-focused) row shows its close
++    // button; the active row shows just favicon and title.
++    return hovered_or_focused;
+   }
+ 
+   NOTREACHED() << "Unknown tab child view";
+diff --git a/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc b/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
+index 366f3e3..a7b44fe 100644
+--- a/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
+@@ -25,7 +25,7 @@
+ #include "ui/views/view_utils.h"
+ 
+ namespace {
+-constexpr int kTabVerticalPadding = 2;
++constexpr int kTabVerticalPadding = 5;  // Saturn: 5px between tabs (Figma).
+ }  // namespace
+ 
+ UnpinnedTabContainerViewLayout::UnpinnedTabContainerViewLayout(
+diff --git a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+index 92b44cb..2608a40 100644
+--- a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+@@ -222,10 +222,13 @@ SkColor VerticalTabStyleViews::GetCurrentTabBackgroundColor(
+       case TabStyle::TabSelectionState::kInactive: {
+         const auto* tab_view =
+             views::AsViewClass<TabView>(delegate_->GetView());
+-        const int base = (tab_view && tab_view->pinned()) ? 0x0D : 0;
++        // Favorites: white 5% tile, +8% on hover. Rows: white 5% on hover.
++        const bool pinned = tab_view && tab_view->pinned();
++        const int base = pinned ? 0x0D : 0;
++        const int hover = pinned ? 0x14 : 0x0D;
+         return SkColorSetARGB(
+             base::ClampRound<uint8_t>(
+-                base + 0x14 * delegate_->GetHoverAnimationValue()),
++                base + hover * delegate_->GetHoverAnimationValue()),
+             0xFF, 0xFF, 0xFF);
+       }
+     }
+diff --git a/chrome/browser/ui/views/tabs/tab/tab_close_button.cc b/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
+index 775a64f..9714c2d 100644
+--- a/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
++++ b/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
+@@ -36,8 +36,9 @@ namespace {
+ gfx::Size GetButtonSize() {
+   // The close button is larger than the icon inside to provide a larger hit
+   // target.
+-  constexpr int kButtonPadding = 12;
+-  const int icon_size = GetLayoutConstant(LayoutConstant::kTabCloseButtonSize);
++  // Saturn: 20px Figma glyph in a 28px target.
++  constexpr int kButtonPadding = 8;
++  const int icon_size = 20;
+   const int button_size = icon_size + kButtonPadding;
+   return gfx::Size(button_size, button_size);
+ }
+@@ -206,22 +207,18 @@ bool TabCloseButton::GetHitTestMask(SkPath* mask) const {
+   return true;
+ }
+ void TabCloseButton::UpdateIcon() {
+-  const auto& icon = features::IsRoundedIconsEnabled()
+-                         ? kCloseWeight500CustomIcon
+-                         : kCloseTabChromeRefreshOldIcon;
++  // Saturn: close glyph from the Figma design (20px).
++  const auto& icon = kSaturnCloseTabIcon;
+ 
+   SetImageModel(views::Button::STATE_NORMAL,
+                 ui::ImageModel::FromVectorIcon(
+-                    icon, colors_.foreground_color,
+-                    GetLayoutConstant(LayoutConstant::kTabCloseButtonSize)));
++                    icon, colors_.foreground_color, 20));
+   SetImageModel(views::Button::STATE_HOVERED,
+                 ui::ImageModel::FromVectorIcon(
+-                    icon, colors_.foreground_color,
+-                    GetLayoutConstant(LayoutConstant::kTabCloseButtonSize)));
++                    icon, colors_.foreground_color, 20));
+   SetImageModel(views::Button::STATE_PRESSED,
+                 ui::ImageModel::FromVectorIcon(
+-                    icon, colors_.foreground_color,
+-                    GetLayoutConstant(LayoutConstant::kTabCloseButtonSize)));
++                    icon, colors_.foreground_color, 20));
+ }
+ 
+ BEGIN_METADATA(TabCloseButton)
+diff --git a/chrome/browser/ui/views/toolbar/BUILD.gn b/chrome/browser/ui/views/toolbar/BUILD.gn
+index aa58fdf..97ecee5 100644
+--- a/chrome/browser/ui/views/toolbar/BUILD.gn
++++ b/chrome/browser/ui/views/toolbar/BUILD.gn
+@@ -201,6 +201,8 @@ source_set("impl") {
+     "toolbar_glic_constants.h",
+     "toolbar_icon_container_view.cc",
+     "toolbar_ink_drop_util.cc",
++    "saturn_url_pill.cc",
++    "saturn_url_pill.h",
+     "toolbar_view.cc",
+     "webui_app_menu_control.cc",
+     "webui_avatar_toolbar_button.cc",
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.cc b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+new file mode 100644
+index 0000000..4b2d8f7
+--- /dev/null
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+@@ -0,0 +1,363 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/toolbar/saturn_url_pill.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++
++#include "base/scoped_observation.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/app/chrome_command_ids.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "components/omnibox/browser/autocomplete_classifier.h"
++#include "components/omnibox/browser/autocomplete_match.h"
++#include "components/url_formatter/url_formatter.h"
++#include "content/public/browser/web_contents.h"
++#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "ui/base/class_property.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
++#include "ui/events/event.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/canvas.h"
++#include "ui/views/background.h"
++#include "ui/views/controls/button/image_button.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_observer.h"
++#include "url/gurl.h"
++
++namespace {
++
++// Figma node 4097:356.
++constexpr int kTextLeft = 12;
++constexpr int kCopySize = 34;
++constexpr int kCopyRadius = 8;
++constexpr int kCopyIconSize = 20;
++constexpr int kCopyRightGap = 2;  // 238 - (202 + 34).
++constexpr SkColor kWhite5 = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
++
++// The popup.
++constexpr int kPopupWidth = 640;
++constexpr int kPopupHeight = 52;
++constexpr int kPopupRadius = 12;
++constexpr int kPopupPadding = 16;
++constexpr SkColor kPopupColor = SkColorSetRGB(0x1E, 0x1E, 0x1E);
++constexpr SkColor kPopupBorderColor = SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF);
++
++GURL ActiveUrl(BrowserView* browser_view) {
++  content::WebContents* const contents =
++      browser_view ? browser_view->GetActiveWebContents() : nullptr;
++  return contents ? contents->GetVisibleURL() : GURL();
++}
++
++// "https://www.youtube.com/watch?v=..." -> "youtube.com". Non-web pages show
++// their formatted URL ("saturn://settings").
++std::u16string DisplayDomain(const GURL& url) {
++  if (url.is_empty() || url.IsAboutBlank()) {
++    return std::u16string();
++  }
++  if (url.SchemeIsHTTPOrHTTPS()) {
++    std::string host(url.host());
++    if (base::StartsWith(host, "www.")) {
++      host = host.substr(4);
++    }
++    return url_formatter::IDNToUnicode(host);
++  }
++  return url_formatter::FormatUrl(url);
++}
++
++std::u16string FullUrl(const GURL& url) {
++  if (url.is_empty() || url.IsAboutBlank()) {
++    return std::u16string();
++  }
++  return url_formatter::FormatUrl(url, url_formatter::kFormatUrlOmitNothing,
++                                  base::UnescapeRule::NONE, nullptr, nullptr,
++                                  nullptr);
++}
++
++// The 34x34 copy-link button: white 5% behind the icon while hovered.
++class SaturnCopyButton : public views::ImageButton {
++  METADATA_HEADER(SaturnCopyButton, views::ImageButton)
++
++ public:
++  using views::ImageButton::ImageButton;
++
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    if (GetState() != STATE_HOVERED && GetState() != STATE_PRESSED) {
++      return;
++    }
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setColor(kWhite5);
++    canvas->DrawRoundRect(GetLocalBounds(), kCopyRadius, flags);
++  }
++};
++
++BEGIN_METADATA(SaturnCopyButton)
++END_METADATA
++
++class SaturnUrlPopupContents : public views::View {
++  METADATA_HEADER(SaturnUrlPopupContents, views::View)
++
++ public:
++  SaturnUrlPopupContents() = default;
++
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setColor(kPopupColor);
++    gfx::RectF r(GetLocalBounds());
++    canvas->DrawRoundRect(r, kPopupRadius, flags);
++    flags.setStyle(cc::PaintFlags::kStroke_Style);
++    flags.setStrokeWidth(1);
++    flags.setColor(kPopupBorderColor);
++    r.Inset(0.5f);
++    canvas->DrawRoundRect(r, kPopupRadius - 0.5f, flags);
++  }
++
++  void Layout(PassKey) override {
++    if (children().empty()) {
++      return;
++    }
++    gfx::Rect r = GetLocalBounds();
++    r.Inset(gfx::Insets::VH(0, kPopupPadding));
++    children()[0]->SetBoundsRect(r);
++  }
++};
++
++BEGIN_METADATA(SaturnUrlPopupContents)
++END_METADATA
++
++}  // namespace
++
++// The popup (one per browser window, reused): a frameless window with a
++// single text field, centered over the page.
++class SaturnUrlPopup : public views::WidgetObserver,
++                       public views::TextfieldController {
++ public:
++  explicit SaturnUrlPopup(BrowserView* browser_view)
++      : browser_view_(browser_view) {}
++  SaturnUrlPopup(const SaturnUrlPopup&) = delete;
++  SaturnUrlPopup& operator=(const SaturnUrlPopup&) = delete;
++  ~SaturnUrlPopup() override = default;
++
++  void Show(const std::u16string& text, bool new_tab) {
++    new_tab_ = new_tab;
++    if (!widget_) {
++      Create();
++    }
++    if (!textfield_) {
++      return;
++    }
++
++    views::View* const page = browser_view_->contents_container();
++    gfx::Rect area = page && page->GetVisible() && !page->bounds().IsEmpty()
++                         ? page->GetBoundsInScreen()
++                         : browser_view_->GetBoundsInScreen();
++    const int w = std::min(kPopupWidth, std::max(200, area.width() - 40));
++    widget_->SetBounds(gfx::Rect(area.x() + (area.width() - w) / 2,
++                                 area.y() + (area.height() - kPopupHeight) / 2,
++                                 w, kPopupHeight));
++
++    textfield_->SetText(text);
++    widget_->Show();
++    widget_->Activate();
++    textfield_->RequestFocus();
++    textfield_->SelectAll(false);
++  }
++
++  void Hide() {
++    if (widget_ && widget_->IsVisible()) {
++      widget_->Hide();
++    }
++  }
++
++  // views::WidgetObserver:
++  void OnWidgetActivationChanged(views::Widget* widget, bool active) override {
++    if (!active) {
++      Hide();
++    }
++  }
++  void OnWidgetDestroying(views::Widget* widget) override {
++    textfield_ = nullptr;
++    observation_.Reset();
++  }
++
++  // views::TextfieldController:
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& event) override {
++    if (event.type() != ui::EventType::kKeyPressed) {
++      return false;
++    }
++    if (event.key_code() == ui::VKEY_RETURN) {
++      Submit();
++      return true;
++    }
++    if (event.key_code() == ui::VKEY_ESCAPE) {
++      Hide();
++      return true;
++    }
++    return false;
++  }
++
++ private:
++  void Create() {
++    views::Widget::InitParams params(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
++    params.parent = browser_view_->GetWidget()->GetNativeView();
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
++    params.activatable = views::Widget::InitParams::Activatable::kYes;
++    params.name = "SaturnUrlPopup";
++    widget_ = std::make_unique<views::Widget>();
++    widget_->Init(std::move(params));
++
++    auto contents = std::make_unique<SaturnUrlPopupContents>();
++    auto textfield = std::make_unique<views::Textfield>();
++    textfield->set_controller(this);
++    textfield->SetBorder(nullptr);
++    textfield->SetBackgroundColor(kPopupColor);
++    textfield->SetTextColorId(ui::kColorSysOnSurface);
++    textfield->SetPlaceholderText(u"Search or enter URL");
++    textfield->SetPlaceholderTextColorId(ui::kColorSysOnSurfaceSubtle);
++    textfield->SetFontList(saturn::SidebarFont().DeriveWithSizeDelta(2));
++    textfield->GetViewAccessibility().SetName(u"Search or enter URL");
++    textfield_ = contents->AddChildView(std::move(textfield));
++    widget_->SetContentsView(std::move(contents));
++    observation_.Observe(widget_.get());
++  }
++
++  void Submit() {
++    std::u16string text;
++    base::TrimWhitespace(textfield_->GetText(), base::TRIM_ALL, &text);
++    Hide();
++    if (text.empty()) {
++      return;
++    }
++    BrowserWindowInterface* const browser = browser_view_->browser();
++    AutocompleteMatch match;
++    AutocompleteClassifierFactory::GetForProfile(browser->GetProfile())
++        ->Classify(text, /*in_keyword_mode=*/false,
++                   /*allow_exact_keyword_match=*/false,
++                   metrics::OmniboxEventProto::OTHER, &match, nullptr);
++    if (!match.destination_url.is_valid()) {
++      return;
++    }
++    NavigateParams params(
++        browser, match.destination_url,
++        ui::PageTransitionFromInt(match.transition |
++                                  ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
++    params.disposition = new_tab_ ? WindowOpenDisposition::NEW_FOREGROUND_TAB
++                                  : WindowOpenDisposition::CURRENT_TAB;
++    Navigate(&params);
++  }
++
++  raw_ptr<BrowserView> browser_view_;
++  std::unique_ptr<views::Widget> widget_;
++  raw_ptr<views::Textfield> textfield_ = nullptr;
++  bool new_tab_ = false;
++  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
++      this};
++};
++
++DEFINE_UI_CLASS_PROPERTY_TYPE(SaturnUrlPopup*)
++
++namespace {
++DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(SaturnUrlPopup, kSaturnUrlPopupKey)
++}  // namespace
++
++void ShowSaturnUrlPopup(BrowserView* browser_view,
++                        const std::u16string& text,
++                        bool new_tab) {
++  if (!browser_view || !browser_view->GetWidget()) {
++    return;
++  }
++  SaturnUrlPopup* popup = browser_view->GetProperty(kSaturnUrlPopupKey);
++  if (!popup) {
++    browser_view->SetProperty(kSaturnUrlPopupKey,
++                              std::make_unique<SaturnUrlPopup>(browser_view));
++    popup = browser_view->GetProperty(kSaturnUrlPopupKey);
++  }
++  popup->Show(text, new_tab);
++}
++
++SaturnUrlPill::SaturnUrlPill(BrowserView* browser_view)
++    : browser_view_(browser_view) {
++  label_ = AddChildView(std::make_unique<views::Label>());
++  label_->SetFontList(saturn::SidebarFont());
++  label_->SetAutoColorReadabilityEnabled(false);
++  label_->SetEnabledColor(SK_ColorWHITE);
++  label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  label_->SetElideBehavior(gfx::ELIDE_TAIL);
++  label_->SetCanProcessEventsWithinSubtree(false);
++
++  auto copy = std::make_unique<SaturnCopyButton>(base::BindRepeating(
++      [](SaturnUrlPill* pill) {
++        if (pill->browser_view_) {
++          chrome::ExecuteCommand(pill->browser_view_->browser(), IDC_COPY_URL);
++        }
++      },
++      base::Unretained(this)));
++  copy->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(kSaturnLinkIcon, SK_ColorWHITE,
++                                     kCopyIconSize));
++  copy->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
++  copy->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
++  copy->SetTooltipText(u"Copy link");
++  copy->GetViewAccessibility().SetName(u"Copy link");
++  copy_ = AddChildView(std::move(copy));
++}
++
++SaturnUrlPill::~SaturnUrlPill() = default;
++
++void SaturnUrlPill::Refresh() {
++  label_->SetText(DisplayDomain(ActiveUrl(browser_view_)));
++}
++
++void SaturnUrlPill::Layout(PassKey) {
++  const int copy_x = width() - kCopyRightGap - kCopySize;
++  copy_->SetBounds(copy_x, (height() - kCopySize) / 2, kCopySize, kCopySize);
++  label_->SetBounds(kTextLeft, 0, std::max(0, copy_x - kTextLeft - 4),
++                    height());
++}
++
++void SaturnUrlPill::OnPaintBackground(gfx::Canvas* canvas) {
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setColor(kWhite5);
++  canvas->DrawRoundRect(GetLocalBounds(), saturn::kSidebarUrlPillRadius,
++                        flags);
++}
++
++bool SaturnUrlPill::OnMousePressed(const ui::MouseEvent& event) {
++  return event.IsOnlyLeftMouseButton();
++}
++
++void SaturnUrlPill::OnMouseReleased(const ui::MouseEvent& event) {
++  if (event.IsLeftMouseButton() && HitTestPoint(event.location())) {
++    ShowSaturnUrlPopup(browser_view_, FullUrl(ActiveUrl(browser_view_)),
++                       /*new_tab=*/false);
++  }
++}
++
++BEGIN_METADATA(SaturnUrlPill)
++END_METADATA
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.h b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+new file mode 100644
+index 0000000..e931614
+--- /dev/null
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+@@ -0,0 +1,56 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_TOOLBAR_SATURN_URL_PILL_H_
++#define CHROME_BROWSER_UI_VIEWS_TOOLBAR_SATURN_URL_PILL_H_
++
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/view.h"
++
++class BrowserView;
++
++namespace views {
++class Label;
++class ImageButton;
++}  // namespace views
++
++// Saturn: the sidebar's URL pill (Figma node 4097:356). Shows the current
++// page's domain ("youtube.com") and a copy-link button; clicking the pill
++// opens the URL popup with the full URL. LocationBarView stays laid out
++// underneath it (invisible) so bubbles keep their anchors.
++class SaturnUrlPill : public views::View {
++  METADATA_HEADER(SaturnUrlPill, views::View)
++
++ public:
++  explicit SaturnUrlPill(BrowserView* browser_view);
++  SaturnUrlPill(const SaturnUrlPill&) = delete;
++  SaturnUrlPill& operator=(const SaturnUrlPill&) = delete;
++  ~SaturnUrlPill() override;
++
++  // Re-reads the active tab's URL.
++  void Refresh();
++
++  // views::View:
++  void Layout(PassKey) override;
++  void OnPaintBackground(gfx::Canvas* canvas) override;
++  bool OnMousePressed(const ui::MouseEvent& event) override;
++  void OnMouseReleased(const ui::MouseEvent& event) override;
++
++ private:
++  raw_ptr<BrowserView> browser_view_;
++  raw_ptr<views::Label> label_ = nullptr;
++  raw_ptr<views::ImageButton> copy_ = nullptr;
++};
++
++// Saturn: shows the URL popup centered over the page. `text` is prefilled
++// and selected. Enter navigates: in a new foreground tab if `new_tab`,
++// otherwise in the current tab. Escape or clicking elsewhere does nothing.
++void ShowSaturnUrlPopup(BrowserView* browser_view,
++                        const std::u16string& text,
++                        bool new_tab);
++
++#endif  // CHROME_BROWSER_UI_VIEWS_TOOLBAR_SATURN_URL_PILL_H_
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index fc76f61..fb49722 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -82,6 +82,7 @@
+ #include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "chrome/browser/ui/views/toolbar/saturn_url_pill.h"
+ #include "cc/paint/paint_flags.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/views/controls/menu/menu_runner.h"
+@@ -674,6 +675,11 @@ void ToolbarView::Init() {
+     sliders->SetProperty(views::kViewIgnoredByLayoutKey, true);
+     saturn_sliders_ = AddChildView(std::move(sliders));
+ 
++    // Saturn: the URL pill; LocationBarView stays underneath, invisible, so
++    // bubbles anchored to it still work.
++    saturn_url_pill_ =
++        AddChildView(std::make_unique<SaturnUrlPill>(browser_view_));
++
+     // Saturn: Figma icons for the navigation buttons.
+     if (back_) {
+       back_->SetVectorIcons(kSaturnBackIcon, kSaturnBackIcon);
+@@ -1261,6 +1267,9 @@ void ToolbarView::Update(WebContents* tab) {
+   if (location_bar_) {
+     location_bar_->Update(tab);
+   }
++  if (saturn_url_pill_) {
++    saturn_url_pill_->Refresh();
++  }
+ 
+   if (custom_tab_bar_) {
+     custom_tab_bar_->UpdateContents();
+@@ -1551,6 +1560,14 @@ void ToolbarView::Layout(PassKey) {
+       display_mode_ == DisplayMode::kNormal && IsSaturnSidebarLayout();
+   if (location_bar_view_) {
+     location_bar_view_->SetSaturnSidebarMode(saturn_sidebar);
++    // Saturn: in the sidebar the pill replaces the location bar visually.
++    if (saturn_sidebar && !location_bar_view_->layer()) {
++      location_bar_view_->SetPaintToLayer();
++      location_bar_view_->layer()->SetFillsBoundsOpaquely(false);
++    }
++    if (location_bar_view_->layer()) {
++      location_bar_view_->layer()->SetOpacity(saturn_sidebar ? 0.0f : 1.0f);
++    }
+   }
+   if (display_mode_ == DisplayMode::kNormal && background()) {
+     if (auto* bg = background()->AsA<CustomCornersBackground>()) {
+@@ -1567,6 +1584,9 @@ void ToolbarView::Layout(PassKey) {
+   if (saturn_sliders_) {
+     saturn_sliders_->SetBoundsRect(gfx::Rect());
+   }
++  if (saturn_url_pill_) {
++    saturn_url_pill_->SetBoundsRect(gfx::Rect(-10000, -10000, 0, 0));
++  }
+ 
+   if (display_mode_ == DisplayMode::kNormal) {
+     LayoutCommon();
+@@ -1682,10 +1702,15 @@ void ToolbarView::LayoutSaturnSidebar() {
+   }
+ 
+   // Row 2: the URL pill.
++  const gfx::Rect pill(0, kSize + saturn::kSidebarRowGap, width(),
++                       saturn::kSidebarUrlPillHeight);
+   location_bar_view_->SetVisible(true);
+-  location_bar_view_->SetBoundsRect(
+-      gfx::Rect(0, kSize + saturn::kSidebarRowGap, width(),
+-                saturn::kSidebarUrlPillHeight));
++  location_bar_view_->SetBoundsRect(pill);
++  if (saturn_url_pill_) {
++    saturn_url_pill_->SetVisible(true);
++    saturn_url_pill_->SetBoundsRect(pill);
++    saturn_url_pill_->Refresh();
++  }
+ }
+ 
+ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+index ed81e5f..d99d47e 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -46,6 +46,7 @@
+ #include "chromeos/ash/experiences/arc/mojom/intent_helper.mojom-forward.h"  // nogncheck https://crbug.com/784179
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
++class SaturnUrlPill;
+ class ActorTaskListBubble;
+ class AvatarToolbarButton;
+ class AvatarToolbarButtonInterface;
+@@ -515,6 +516,8 @@ class ToolbarView : public views::AccessiblePaneView,
+   // Saturn: hides the sidebar; only visible in the sidebar layout.
+   raw_ptr<ToolbarButton> saturn_sidebar_toggle_ = nullptr;
+   raw_ptr<ToolbarButton> saturn_sliders_ = nullptr;
++  // Saturn: the URL pill drawn over the (invisible) location bar.
++  raw_ptr<SaturnUrlPill> saturn_url_pill_ = nullptr;
+   base::CallbackListSubscription saturn_collapse_subscription_;
+ 
+   // Subscription for when contextual tasks button position should update.
