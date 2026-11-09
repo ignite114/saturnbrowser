@@ -1,0 +1,877 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Mon, 9 Nov 2026 12:43:17 +0500
+Subject: [PATCH 6/6] Saturn: sidebar phase 3 - spaces, Pinned list
+
+Spaces are profiles, so each space has its own cookies, favorites (pinned
+tabs) and Pinned list. The sidebar shows the space name above the
+favorites, the space's Pinned list (bookmark folder Other bookmarks/Pinned;
+click opens or switches to the page, right-click removes) above the Clear
+divider, and a bottom bar with downloads, one dot per space (click switches:
+the target space's window takes this window's place) and + (new space via
+the profile picker). Tabs get an 'Add to Pinned list' context menu item.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chrome/browser/ui/tabs/saturn_pinned_folder.h |  82 +++
+ chrome/browser/ui/tabs/tab_menu_model.cc      |   2 +
+ chrome/browser/ui/tabs/tab_strip_model.cc     |  16 +
+ .../ui/views/frame/saturn_sidebar_constants.h |  15 +
+ .../frame/vertical_tab_strip_region_view.cc   | 496 +++++++++++++++++-
+ .../frame/vertical_tab_strip_region_view.h    |   1 +
+ .../ui/views/tabs/common/tab_strip_view.cc    |   6 +
+ .../ui/views/tabs/common/tab_strip_view.h     |   4 +
+ .../tabs/common/tab_strip_view_layout.cc      |  27 +-
+ .../tabs/public/tab_context_menu_command.h    |   2 +
+ 10 files changed, 642 insertions(+), 9 deletions(-)
+ create mode 100644 chrome/browser/ui/tabs/saturn_pinned_folder.h
+
+diff --git a/chrome/browser/ui/tabs/saturn_pinned_folder.h b/chrome/browser/ui/tabs/saturn_pinned_folder.h
+new file mode 100644
+index 0000000..bcaca06
+--- /dev/null
++++ b/chrome/browser/ui/tabs/saturn_pinned_folder.h
+@@ -0,0 +1,82 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_TABS_SATURN_PINNED_FOLDER_H_
++#define CHROME_BROWSER_UI_TABS_SATURN_PINNED_FOLDER_H_
++
++#include <string>
++
++#include "base/location.h"
++#include "base/strings/utf_string_conversions.h"
++#include "components/bookmarks/browser/bookmark_model.h"
++#include "components/bookmarks/browser/bookmark_node.h"
++#include "components/bookmarks/common/bookmark_metrics.h"
++#include "url/gurl.h"
++
++// Saturn: each space (= profile) keeps its sidebar "Pinned" list as a bookmark
++// folder named "Pinned" under "Other bookmarks". Header-only helpers shared by
++// the tab context menu and the sidebar.
++namespace saturn {
++
++inline constexpr char16_t kPinnedFolderTitle[] = u"Pinned";
++
++inline const bookmarks::BookmarkNode* FindPinnedFolder(
++    const bookmarks::BookmarkModel* model) {
++  if (!model || !model->loaded()) {
++    return nullptr;
++  }
++  for (const auto& child : model->other_node()->children()) {
++    if (child->is_folder() && child->GetTitle() == kPinnedFolderTitle) {
++      return child.get();
++    }
++  }
++  return nullptr;
++}
++
++inline const bookmarks::BookmarkNode* FindInPinned(
++    const bookmarks::BookmarkModel* model,
++    const GURL& url) {
++  const bookmarks::BookmarkNode* folder = FindPinnedFolder(model);
++  if (!folder) {
++    return nullptr;
++  }
++  for (const auto& child : folder->children()) {
++    if (child->is_url() && child->url() == url) {
++      return child.get();
++    }
++  }
++  return nullptr;
++}
++
++// Adds `url` to the Pinned list (creating the folder on first use). No-op if
++// it is already there or the model isn't loaded.
++inline void AddToPinned(bookmarks::BookmarkModel* model,
++                        const std::u16string& title,
++                        const GURL& url) {
++  if (!model || !model->loaded() || !url.is_valid() ||
++      FindInPinned(model, url)) {
++    return;
++  }
++  const bookmarks::BookmarkNode* folder = FindPinnedFolder(model);
++  if (!folder) {
++    folder = model->AddFolder(model->other_node(),
++                              model->other_node()->children().size(),
++                              kPinnedFolderTitle);
++  }
++  model->AddNewURL(folder, folder->children().size(),
++                   title.empty() ? base::UTF8ToUTF16(url.spec()) : title,
++                   url);
++}
++
++inline void RemoveFromPinned(bookmarks::BookmarkModel* model,
++                             const bookmarks::BookmarkNode* node) {
++  if (model && node) {
++    model->Remove(node, bookmarks::metrics::BookmarkEditSource::kUser,
++                  FROM_HERE);
++  }
++}
++
++}  // namespace saturn
++
++#endif  // CHROME_BROWSER_UI_TABS_SATURN_PINNED_FOLDER_H_
+diff --git a/chrome/browser/ui/tabs/tab_menu_model.cc b/chrome/browser/ui/tabs/tab_menu_model.cc
+index 948fb35..1fadc94 100644
+--- a/chrome/browser/ui/tabs/tab_menu_model.cc
++++ b/chrome/browser/ui/tabs/tab_menu_model.cc
+@@ -533,6 +533,8 @@ void TabMenuModel::Build(int index) {
+                                                 : views::kUnpinOldIcon,
+             ui::kColorMenuIcon, ui::SimpleMenuModel::kDefaultIconSize));
+   }
++  // Saturn: keep this page in the sidebar's Pinned list (per space).
++  AddItem(TabStripModel::CommandSaturnAddToPinned, u"Add to Pinned list");
+ 
+   // When the menu targets a single split, "Mute sites" opens a submenu that can
+   // also mute the site in just one of the views.
+diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
+index 49011a9..531960b 100644
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -64,6 +64,8 @@
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/browser/ui/tabs/tab_group_desktop.h"
+ #include "chrome/browser/ui/tabs/tab_group_model.h"
++#include "chrome/browser/bookmarks/bookmark_model_factory.h"
++#include "chrome/browser/ui/tabs/saturn_pinned_folder.h"
+ #include "chrome/browser/ui/tabs/tab_model.h"
+ #include "chrome/browser/ui/tabs/tab_muted_utils.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
+@@ -2722,6 +2724,9 @@ bool TabStripModel::IsContextMenuCommandEnabled(
+     case CommandToggleGrouped:
+       return SupportsTabGroups();
+ 
++    case CommandSaturnAddToPinned:
++      return true;
++
+     case CommandSendTabToSelf:
+       return true;
+ 
+@@ -2918,6 +2923,17 @@ void TabStripModel::ExecuteContextMenuCommand(int context_index,
+       break;
+     }
+ 
++    case CommandSaturnAddToPinned: {
++      bookmarks::BookmarkModel* const bookmark_model =
++          BookmarkModelFactory::GetForBrowserContext(profile_);
++      for (int index : GetIndicesForCommand(context_index)) {
++        content::WebContents* const contents = GetWebContentsAt(index);
++        saturn::AddToPinned(bookmark_model, contents->GetTitle(),
++                            contents->GetLastCommittedURL());
++      }
++      break;
++    }
++
+     case CommandTogglePinned: {
+       base::UmaHistogramCounts1000(
+           "Tab.ContextMenu.TogglePinned.SelectedTabsCount",
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+index ca7866d..7590693 100644
+--- a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -34,6 +34,21 @@ inline constexpr int kTodayHeaderHeight =
+     kTodayDividerRowHeight + kTodayNewTabTopGap + kTodayNewTabHeight;
+ inline constexpr int kTodayHeaderBottomGap = 5;
+ 
++// Space name above the favorites ("Primary").
++inline constexpr int kSpaceLabelHeight = 14;
++inline constexpr int kSpaceLabelBottomGap = 10;
++
++// Pinned list rows (per-space bookmark folder).
++inline constexpr int kPinnedRowHeight = 38;
++inline constexpr int kPinnedRowGap = 5;
++inline constexpr int kPinnedListBottomGap = 7;
++
++// Bottom bar: downloads, space dots, new space.
++inline constexpr int kSpacesBarHeight = 34;
++inline constexpr int kSpacesBarBottomPadding = 10;
++inline constexpr int kSpaceDotSize = 5;
++inline constexpr int kSpaceDotPitch = 14;
++
+ // Toolbar inside the sidebar.
+ inline constexpr int kSidebarButtonSize = 34;
+ inline constexpr int kSidebarButtonSpacing = 5;
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index fbcd178..9ff91de 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -54,6 +54,34 @@
+ #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
+ #include "chrome/browser/ui/views/tabs/shared/new_tab_button.h"
++#include "base/scoped_observation.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "cc/paint/paint_flags.h"
++#include "chrome/browser/bookmarks/bookmark_model_factory.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/profiles/profile_window.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/chrome_pages.h"
++#include "chrome/browser/ui/profiles/profile_picker.h"
++#include "chrome/browser/ui/tabs/saturn_pinned_folder.h"
++#include "chrome/common/chrome_constants.h"
++#include "components/bookmarks/browser/base_bookmark_model_observer.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/menus/simple_menu_model.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/gfx/canvas.h"
++#include "ui/views/animation/ink_drop.h"
++#include "ui/views/context_menu_controller.h"
++#include "ui/views/controls/button/image_button.h"
++#include "ui/views/controls/highlight_path_generator.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/menu/menu_runner.h"
+ #include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+@@ -117,8 +145,428 @@ void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
+   }
+ }
+ 
+-// Saturn: the row above today's tabs: a divider with "Clear" on the right,
+-// then a "New tab" row (shown while the sidebar is expanded).
++// Saturn: name of the current space (profile). The initial profile shows as
++// "Primary" until the user renames it.
++std::u16string SaturnSpaceName(Profile* profile) {
++  if (!g_browser_process->profile_manager()) {
++    return u"Primary";
++  }
++  const base::FilePath path = profile->GetOriginalProfile()->GetPath();
++  ProfileAttributesEntry* const entry = g_browser_process->profile_manager()
++                                            ->GetProfileAttributesStorage()
++                                            .GetProfileAttributesWithPath(path);
++  if (!entry || (entry->IsUsingDefaultName() &&
++                 path.BaseName().value() ==
++                     base::FilePath::FromASCII(chrome::kInitialProfile)
++                         .value())) {
++    return u"Primary";
++  }
++  return entry->GetLocalProfileName();
++}
++
++// Saturn: spaces are profiles (separate cookies, favorites, Pinned list).
++// Switching shows the target space's window where this one was and minimizes
++// this one.
++void SaturnSwitchSpace(BrowserWindowInterface* from,
++                       const base::FilePath& path) {
++  if (from->GetProfile()->GetOriginalProfile()->GetPath() == path) {
++    return;
++  }
++  ui::BaseWindow* const window = from->GetWindow();
++  const bool maximized = window->IsMaximized();
++  const gfx::Rect bounds = window->GetRestoredBounds();
++  profiles::SwitchToProfile(
++      path, /*always_create=*/false,
++      base::BindOnce(
++          [](gfx::Rect bounds, bool maximized,
++             BrowserWindowInterface* target) {
++            if (!target) {
++              return;
++            }
++            ui::BaseWindow* const target_window = target->GetWindow();
++            if (maximized) {
++              target_window->Maximize();
++            } else {
++              target_window->SetBounds(bounds);
++            }
++          },
++          bounds, maximized));
++  window->Minimize();
++}
++
++std::vector<ProfileAttributesEntry*> SaturnSpaces() {
++  std::vector<ProfileAttributesEntry*> spaces;
++  if (!g_browser_process->profile_manager()) {
++    return spaces;
++  }
++  for (ProfileAttributesEntry* entry : g_browser_process->profile_manager()
++                                           ->GetProfileAttributesStorage()
++                                           .GetAllProfilesAttributesSortedForDisplay()) {
++    if (!entry->IsOmitted()) {
++      spaces.push_back(entry);
++    }
++  }
++  return spaces;
++}
++
++void SaturnOpenOrSwitchTo(BrowserWindowInterface* browser, const GURL& url) {
++  TabStripModel* const model = browser->GetTabStripModel();
++  for (int i = 0; i < model->count(); ++i) {
++    content::WebContents* const contents = model->GetWebContentsAt(i);
++    if (contents->GetLastCommittedURL() == url ||
++        contents->GetVisibleURL() == url) {
++      model->ActivateTabAt(i);
++      return;
++    }
++  }
++  chrome::AddTabAt(browser, url, -1, /*foreground=*/true);
++}
++
++void SaturnRemovePinnedUrl(base::WeakPtr<Profile> profile, GURL url) {
++  if (!profile) {
++    return;
++  }
++  bookmarks::BookmarkModel* const model =
++      BookmarkModelFactory::GetForBrowserContext(profile.get());
++  saturn::RemoveFromPinned(model, saturn::FindInPinned(model, url));
++}
++
++// Saturn: one row of the Pinned list. Click opens the page (or switches to
++// the tab already showing it); right-click offers "Remove from Pinned list".
++class SaturnPinnedRow : public views::LabelButton,
++                        public views::ContextMenuController,
++                        public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(SaturnPinnedRow, views::LabelButton)
++
++ public:
++  SaturnPinnedRow(BrowserWindowInterface* browser,
++                  const std::u16string& title,
++                  const GURL& url,
++                  const gfx::Image& favicon)
++      : views::LabelButton(base::BindRepeating(&SaturnPinnedRow::Open,
++                                               base::Unretained(this)),
++                           title),
++        browser_(browser),
++        url_(url) {
++    SetImageModel(
++        views::Button::STATE_NORMAL,
++        favicon.IsEmpty()
++            ? ui::ImageModel::FromVectorIcon(
++                  vector_icons::kGlobeIcon,
++                  SkColorSetARGB(0xB3, 0xFF, 0xFF, 0xFF), 16)
++            : ui::ImageModel::FromImage(favicon));
++    SetImageLabelSpacing(9);
++    SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(0, 7, 0, 8)));
++    SetEnabledTextColors(SkColorSetARGB(0xE6, 0xFF, 0xFF, 0xFF));
++    label()->SetElideBehavior(gfx::ELIDE_TAIL);
++    SetTooltipText(base::UTF8ToUTF16(url.spec()));
++    set_context_menu_controller(this);
++    UpdateBackground();
++  }
++
++  // views::Button:
++  void StateChanged(ButtonState old_state) override {
++    views::LabelButton::StateChanged(old_state);
++    UpdateBackground();
++  }
++
++  // views::ContextMenuController:
++  void ShowContextMenuForViewImpl(views::View* source,
++                                  const gfx::Point& point,
++                                  ui::mojom::MenuSourceType source_type)
++      override {
++    menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++    menu_model_->AddItem(kRemoveCommand, u"Remove from Pinned list");
++    menu_runner_ = std::make_unique<views::MenuRunner>(
++        menu_model_.get(), views::MenuRunner::CONTEXT_MENU);
++    menu_runner_->RunMenuAt(GetWidget(), nullptr,
++                            gfx::Rect(point, gfx::Size()),
++                            views::MenuAnchorPosition::kTopLeft, source_type);
++  }
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override {
++    if (command_id != kRemoveCommand) {
++      return;
++    }
++    // Removing rebuilds the list (and deletes this row), so do it after the
++    // menu has finished.
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(&SaturnRemovePinnedUrl,
++                                  browser_->GetProfile()->GetWeakPtr(), url_));
++  }
++
++ private:
++  static constexpr int kRemoveCommand = 1;
++
++  void Open() { SaturnOpenOrSwitchTo(browser_, url_); }
++
++  void UpdateBackground() {
++    const bool hot = GetState() == views::Button::STATE_HOVERED ||
++                     GetState() == views::Button::STATE_PRESSED;
++    SetBackground(views::CreateRoundedRectBackground(
++        SkColorSetARGB(hot ? 0x1A : 0x0D, 0xFF, 0xFF, 0xFF),
++        GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius)));
++  }
++
++  raw_ptr<BrowserWindowInterface> browser_;
++  const GURL url_;
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++BEGIN_METADATA(SaturnPinnedRow)
++END_METADATA
++
++// Saturn: the space's Pinned list ("Other bookmarks/Pinned").
++class SaturnPinnedList : public views::View,
++                         public bookmarks::BaseBookmarkModelObserver {
++  METADATA_HEADER(SaturnPinnedList, views::View)
++
++ public:
++  explicit SaturnPinnedList(BrowserWindowInterface* browser)
++      : browser_(browser),
++        model_(BookmarkModelFactory::GetForBrowserContext(
++            browser->GetProfile())) {
++    if (model_) {
++      observation_.Observe(model_.get());
++      Rebuild();
++    }
++  }
++
++  // bookmarks::BaseBookmarkModelObserver:
++  void BookmarkModelChanged() override { Rebuild(); }
++  void BookmarkNodeFaviconChanged(const bookmarks::BookmarkNode* node) override {
++    if (node->parent() == saturn::FindPinnedFolder(model_)) {
++      Rebuild();
++    }
++  }
++  void BookmarkModelBeingDeleted() override {
++    observation_.Reset();
++    model_ = nullptr;
++  }
++
++  // views::View:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    const int n = static_cast<int>(children().size());
++    return gfx::Size(0, n ? n * saturn::kPinnedRowHeight +
++                                (n - 1) * saturn::kPinnedRowGap
++                          : 0);
++  }
++
++  void Layout(PassKey) override {
++    int y = 0;
++    for (views::View* child : children()) {
++      child->SetBounds(0, y, width(), saturn::kPinnedRowHeight);
++      y += saturn::kPinnedRowHeight + saturn::kPinnedRowGap;
++    }
++  }
++
++ private:
++  void Rebuild() {
++    RemoveAllChildViews();
++    if (const bookmarks::BookmarkNode* folder =
++            saturn::FindPinnedFolder(model_)) {
++      for (const auto& node : folder->children()) {
++        if (node->is_url()) {
++          AddChildView(std::make_unique<SaturnPinnedRow>(
++              browser_, node->GetTitle(), node->url(),
++              model_->GetFavicon(node.get())));
++        }
++      }
++    }
++    PreferredSizeChanged();
++  }
++
++  raw_ptr<BrowserWindowInterface> browser_;
++  raw_ptr<bookmarks::BookmarkModel> model_;
++  base::ScopedObservation<bookmarks::BookmarkModel,
++                          bookmarks::BookmarkModelObserver>
++      observation_{this};
++};
++
++BEGIN_METADATA(SaturnPinnedList)
++END_METADATA
++
++// Saturn: the space's name above the favorites grid.
++class SaturnSpaceLabel : public views::Label {
++  METADATA_HEADER(SaturnSpaceLabel, views::Label)
++
++ public:
++  explicit SaturnSpaceLabel(BrowserWindowInterface* browser)
++      : views::Label(SaturnSpaceName(browser->GetProfile())) {
++    SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    SetFontList(font_list().DeriveWithSizeDelta(-1));
++    SetAutoColorReadabilityEnabled(false);
++    SetEnabledColor(SkColorSetARGB(0x66, 0xFF, 0xFF, 0xFF));
++    SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(0, 2, 0, 0)));
++  }
++};
++
++BEGIN_METADATA(SaturnSpaceLabel)
++END_METADATA
++
++// Saturn: one dot per space; the current space is bright. Click switches.
++class SaturnSpaceDots : public views::View,
++                        public ProfileAttributesStorage::Observer {
++  METADATA_HEADER(SaturnSpaceDots, views::View)
++
++ public:
++  explicit SaturnSpaceDots(BrowserWindowInterface* browser)
++      : browser_(browser) {
++    if (g_browser_process->profile_manager()) {
++      observation_.Observe(&g_browser_process->profile_manager()
++                                ->GetProfileAttributesStorage());
++    }
++  }
++
++  // ProfileAttributesStorage::Observer:
++  void OnProfileAdded(const base::FilePath& profile_path) override {
++    Refresh();
++  }
++  void OnProfileWasRemoved(const base::FilePath& profile_path,
++                           const std::u16string& profile_name) override {
++    Refresh();
++  }
++  void OnProfileNameChanged(const base::FilePath& profile_path,
++                            const std::u16string& old_profile_name) override {
++    Refresh();
++  }
++
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    const int n = std::max<int>(1, SaturnSpaces().size());
++    return gfx::Size(n * saturn::kSpaceDotPitch, saturn::kSpacesBarHeight);
++  }
++
++  void OnPaint(gfx::Canvas* canvas) override {
++    const auto spaces = SaturnSpaces();
++    const base::FilePath current =
++        browser_->GetProfile()->GetOriginalProfile()->GetPath();
++    const int n = static_cast<int>(spaces.size());
++    const int x0 = (width() - n * saturn::kSpaceDotPitch) / 2;
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    for (int i = 0; i < n; ++i) {
++      flags.setColor(SkColorSetARGB(
++          spaces[i]->GetPath() == current ? 0xE6 : 0x4D, 0xFF, 0xFF, 0xFF));
++      canvas->DrawCircle(
++          gfx::PointF(x0 + i * saturn::kSpaceDotPitch +
++                          saturn::kSpaceDotPitch / 2.0f,
++                      height() / 2.0f),
++          saturn::kSpaceDotSize / 2.0f, flags);
++    }
++  }
++
++  bool OnMousePressed(const ui::MouseEvent& event) override { return true; }
++
++  void OnMouseReleased(const ui::MouseEvent& event) override {
++    const auto spaces = SaturnSpaces();
++    if (const int i = IndexAt(event.location(), spaces.size()); i >= 0) {
++      SaturnSwitchSpace(browser_, spaces[i]->GetPath());
++    }
++  }
++
++  std::u16string GetRenderedTooltipText(const gfx::Point& p) const override {
++    const auto spaces = SaturnSpaces();
++    const int i = IndexAt(p, spaces.size());
++    return i >= 0 ? spaces[i]->GetLocalProfileName() : std::u16string();
++  }
++
++ private:
++  int IndexAt(const gfx::Point& p, size_t count) const {
++    const int n = static_cast<int>(count);
++    const int x0 = (width() - n * saturn::kSpaceDotPitch) / 2;
++    const int i = (p.x() - x0) / saturn::kSpaceDotPitch;
++    return (p.x() >= x0 && i >= 0 && i < n) ? i : -1;
++  }
++
++  void Refresh() {
++    PreferredSizeChanged();
++    SchedulePaint();
++  }
++
++  raw_ptr<BrowserWindowInterface> browser_;
++  base::ScopedObservation<ProfileAttributesStorage,
++                          ProfileAttributesStorage::Observer>
++      observation_{this};
++};
++
++BEGIN_METADATA(SaturnSpaceDots)
++END_METADATA
++
++std::unique_ptr<views::ImageButton> SaturnBarButton(
++    views::Button::PressedCallback callback,
++    const gfx::VectorIcon& icon,
++    const std::u16string& tooltip) {
++  auto button = std::make_unique<views::ImageButton>(std::move(callback));
++  button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(
++          icon, SkColorSetARGB(0xB3, 0xFF, 0xFF, 0xFF), 20));
++  button->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
++  button->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
++  button->SetTooltipText(tooltip);
++  button->SetAccessibleName(tooltip);
++  views::InstallRoundRectHighlightPathGenerator(button.get(), gfx::Insets(),
++                                                10);
++  views::InkDrop::Get(button.get())
++      ->SetMode(views::InkDropHost::InkDropMode::ON);
++  views::InkDrop::Get(button.get())->SetBaseColor(SK_ColorWHITE);
++  return button;
++}
++
++// Saturn: bottom bar - downloads, space dots, new space.
++class SaturnSpacesBar : public views::View {
++  METADATA_HEADER(SaturnSpacesBar, views::View)
++
++ public:
++  explicit SaturnSpacesBar(BrowserWindowInterface* browser) {
++    downloads_ = AddChildView(SaturnBarButton(
++        base::BindRepeating(
++            [](BrowserWindowInterface* b) { chrome::ShowDownloads(b); },
++            base::Unretained(browser)),
++        kDownloadIcon, u"Downloads"));
++    dots_ = AddChildView(std::make_unique<SaturnSpaceDots>(browser));
++    new_space_ = AddChildView(SaturnBarButton(
++        base::BindRepeating([] {
++          ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
++              ProfilePicker::EntryPoint::kProfileMenuAddNewProfile));
++        }),
++        kAddIcon, u"New space"));
++  }
++
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(0, saturn::kSpacesBarHeight);
++  }
++
++  void Layout(PassKey) override {
++    // Pinned to the bottom of whatever height the sidebar gives us.
++    const int s = saturn::kSpacesBarHeight;
++    const int y = std::max(0, height() - s);
++    downloads_->SetBounds(0, y, s, s);
++    new_space_->SetBounds(std::max(0, width() - s), y, s, s);
++    const int dots_w = std::max(0, width() - 2 * s);
++    dots_->SetBounds(s, y, dots_w, s);
++  }
++
++  void VisibilityChanged(views::View* starting_from, bool is_visible) override {
++    dots_->SchedulePaint();
++  }
++
++ private:
++  raw_ptr<views::ImageButton> downloads_ = nullptr;
++  raw_ptr<SaturnSpaceDots> dots_ = nullptr;
++  raw_ptr<views::ImageButton> new_space_ = nullptr;
++};
++
++BEGIN_METADATA(SaturnSpacesBar)
++END_METADATA
++
++// Saturn: the block above today's tabs: the space's Pinned list, a divider
++// with "Clear" on the right, then a "New tab" row (shown while expanded).
+ class SaturnTodayHeader : public views::View {
+   METADATA_HEADER(SaturnTodayHeader, views::View)
+ 
+@@ -126,6 +574,8 @@ class SaturnTodayHeader : public views::View {
+   explicit SaturnTodayHeader(BrowserWindowInterface* browser) {
+     const SkColor muted = SkColorSetARGB(0x80, 0xFF, 0xFF, 0xFF);
+ 
++    pinned_list_ = AddChildView(std::make_unique<SaturnPinnedList>(browser));
++
+     divider_ = AddChildView(std::make_unique<views::View>());
+     divider_->SetBackground(
+         views::CreateSolidBackground(SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF)));
+@@ -155,21 +605,35 @@ class SaturnTodayHeader : public views::View {
+   // views::View:
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+-    return gfx::Size(0, saturn::kTodayHeaderHeight);
++    return gfx::Size(0, PinnedListHeight() + saturn::kTodayHeaderHeight);
++  }
++
++  void ChildPreferredSizeChanged(views::View* child) override {
++    PreferredSizeChanged();
+   }
+ 
+   void Layout(PassKey) override {
+     const int w = width();
++    const int list_h = PinnedListHeight();
++    pinned_list_->SetBounds(0, 0, w,
++                            pinned_list_->GetPreferredSize().height());
++    const int top = list_h;
+     const int row = saturn::kTodayDividerRowHeight;
+-    clear_->SetBounds(std::max(0, w - saturn::kTodayClearWidth), 0,
++    clear_->SetBounds(std::max(0, w - saturn::kTodayClearWidth), top,
+                       std::min(w, saturn::kTodayClearWidth), row);
+     divider_->SetBounds(
+-        0, row / 2, std::max(0, w - saturn::kTodayClearWidth - 14), 1);
+-    new_tab_->SetBounds(0, row + saturn::kTodayNewTabTopGap, w,
++        0, top + row / 2, std::max(0, w - saturn::kTodayClearWidth - 14), 1);
++    new_tab_->SetBounds(0, top + row + saturn::kTodayNewTabTopGap, w,
+                         saturn::kTodayNewTabHeight);
+   }
+ 
+  private:
++  int PinnedListHeight() const {
++    const int h = pinned_list_->GetPreferredSize().height();
++    return h ? h + saturn::kPinnedListBottomGap : 0;
++  }
++
++  raw_ptr<SaturnPinnedList> pinned_list_ = nullptr;
+   raw_ptr<views::View> divider_ = nullptr;
+   raw_ptr<views::LabelButton> clear_ = nullptr;
+   raw_ptr<shared::NewTabButton> new_tab_ = nullptr;
+@@ -281,6 +745,20 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+               LayoutConstant::kVerticalTabStripCollapsedVerticalPadding),
+           region_horizontal_padding, 0, region_horizontal_padding));
+ 
++  // Saturn: bottom bar (downloads, space dots, new space) while expanded.
++  saturn_spaces_bar_ = content_area_view_->AddChildView(
++      std::make_unique<SaturnSpacesBar>(browser_view->browser()));
++  saturn_spaces_bar_->SetProperty(
++      views::kFlexBehaviorKey,
++      views::FlexSpecification(views::MinimumFlexSizeRule::kPreferred,
++                               views::MaximumFlexSizeRule::kUnbounded));
++  saturn_spaces_bar_->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding,
++                        saturn::kSpacesBarBottomPadding,
++                        region_horizontal_padding));
++  saturn_spaces_bar_->SetVisible(!state_controller_->IsCollapsed());
++
+   gemini_button_ =
+       content_area_view_->AddChildView(std::make_unique<views::View>());
+ 
+@@ -952,6 +1430,8 @@ void VerticalTabStripRegionView::AddTabStripView(
+       strip && !strip->saturn_today_header()) {
+     strip->SetSaturnTodayHeader(
+         std::make_unique<SaturnTodayHeader>(browser_view()->browser()));
++    strip->SetSaturnSpaceLabel(
++        std::make_unique<SaturnSpaceLabel>(browser_view()->browser()));
+   }
+   view->SetProperty(
+       views::kFlexBehaviorKey,
+@@ -1009,8 +1489,10 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
+   // the collapsing state.
+   bool collapsed = state != tabs::VerticalTabStripCollapseState::kExpanded;
+ 
+-  // Saturn: expanded, the New tab row lives in the strip's today header.
++  // Saturn: expanded, the New tab row lives in the strip's today header and
++  // the bottom shows the spaces bar.
+   bottom_button_container_->SetVisible(collapsed);
++  saturn_spaces_bar_->SetVisible(!collapsed);
+ 
+   resize_area_->SetVisible(!collapsed ||
+                            !state_controller_->IsExpandOnHoverEnabled() ||
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 85f1aaa..94610f9 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -228,6 +228,7 @@ class VerticalTabStripRegionView final
+   raw_ptr<VerticalTabStripTopContainer> top_button_container_ = nullptr;
+   raw_ptr<views::Separator> top_button_separator_ = nullptr;
+   raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;
++  raw_ptr<views::View> saturn_spaces_bar_ = nullptr;
+   raw_ptr<views::View> gemini_button_ = nullptr;
+   raw_ptr<views::ResizeArea> resize_area_ = nullptr;
+   raw_ptr<ShadowFrameView> shadow_frame_ = nullptr;
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view.cc b/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
+index 6bb39f4..6d6b84c 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
+@@ -477,6 +477,12 @@ void TabStripView::SetSaturnTodayHeader(std::unique_ptr<views::View> header) {
+   InvalidateLayout();
+ }
+ 
++void TabStripView::SetSaturnSpaceLabel(std::unique_ptr<views::View> label) {
++  CHECK(!saturn_space_label_);
++  saturn_space_label_ = AddChildViewAt(std::move(label), 0);
++  InvalidateLayout();
++}
++
+ void TabStripView::SetIsAnimatingSize(bool is_animating) {
+   for (views::ScrollView* scroll_view :
+        {pinned_tabs_scroll_view_, unpinned_tabs_scroll_view_}) {
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view.h b/chrome/browser/ui/views/tabs/common/tab_strip_view.h
+index c323ecd..48f1f42 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view.h
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view.h
+@@ -64,6 +64,9 @@ class TabStripView final : public views::View,
+   // favorites grid and today's tabs while the vertical strip is expanded.
+   void SetSaturnTodayHeader(std::unique_ptr<views::View> header);
+   views::View* saturn_today_header() const { return saturn_today_header_; }
++  // Saturn: the space name shown above the favorites grid while expanded.
++  void SetSaturnSpaceLabel(std::unique_ptr<views::View> label);
++  views::View* saturn_space_label() const { return saturn_space_label_; }
+   void SetIsAnimatingSize(bool is_animating);
+ 
+   bool IsPositionInWindowCaption(const gfx::Point& point);
+@@ -157,6 +160,7 @@ class TabStripView final : public views::View,
+   raw_ptr<TabScrollButtonContainer> tab_scroll_button_container_ = nullptr;
+   bool is_collapsed_ = false;
+   raw_ptr<views::View> saturn_today_header_ = nullptr;
++  raw_ptr<views::View> saturn_space_label_ = nullptr;
+ 
+   // Used for seek time metrics from the time the mouse enters the tabstrip.
+   std::optional<base::TimeTicks> mouse_entered_tabstrip_time_;
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc b/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
+index 0909bcc..62a84b1 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
+@@ -264,11 +264,30 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+   // favorites grid and today's tabs while expanded.
+   views::View* const today_header = tab_strip_view->saturn_today_header();
+   const bool show_today_header = today_header && !is_collapsed;
++  const int today_header_content_height =
++      show_today_header ? today_header->GetPreferredSize().height() : 0;
+   const int today_header_height =
+       show_today_header
+-          ? saturn::kTodayHeaderHeight + saturn::kTodayHeaderBottomGap
++          ? today_header_content_height + saturn::kTodayHeaderBottomGap
+           : 0;
+ 
++  // Saturn: the space name above the favorites grid.
++  views::View* const space_label = tab_strip_view->saturn_space_label();
++  const bool show_space_label = space_label && !is_collapsed;
++  if (space_label) {
++    gfx::Rect label_bounds;
++    if (show_space_label) {
++      label_bounds = gfx::Rect(
++          region_horizontal_padding, y,
++          std::max(0, size_bounds.width().value() -
++                          2 * region_horizontal_padding),
++          saturn::kSpaceLabelHeight);
++      y += saturn::kSpaceLabelHeight + saturn::kSpaceLabelBottomGap;
++    }
++    layouts.child_layouts.emplace_back(space_label, show_space_label,
++                                       label_bounds);
++  }
++
+   // If the height is bounded, calculate the available space for laying out the
+   // pinned and unpinned containers.
+   int remaining_height = 0;
+@@ -282,6 +301,10 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+           tabs_separator->GetPreferredSize().height() + region_vertical_padding;
+     }
+     remaining_height -= today_header_height;
++    if (show_space_label) {
++      remaining_height -=
++          saturn::kSpaceLabelHeight + saturn::kSpaceLabelBottomGap;
++    }
+     // Clamp the remaining height to 0 if we have less space.
+     remaining_height = std::max(remaining_height, 0);
+   }
+@@ -335,7 +358,7 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+           region_horizontal_padding, y,
+           std::max(0, size_bounds.width().value() -
+                           2 * region_horizontal_padding),
+-          saturn::kTodayHeaderHeight);
++          today_header_content_height);
+       y += today_header_height;
+     }
+     layouts.child_layouts.emplace_back(today_header, show_today_header,
+diff --git a/components/tabs/public/tab_context_menu_command.h b/components/tabs/public/tab_context_menu_command.h
+index 0ed448f..73d3cbc 100644
+--- a/components/tabs/public/tab_context_menu_command.h
++++ b/components/tabs/public/tab_context_menu_command.h
+@@ -39,6 +39,8 @@ enum TabContextMenuCommand {
+   CommandGlicSwitchToRecentConversation,
+   CommandGlicUnshare,
+   CommandToggleFocusGroup,
++  // Saturn: add the tab's page to the space's sidebar Pinned list.
++  CommandSaturnAddToPinned,
+ };
+ // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/histograms.xml:TabContextMenuCommand)
+ 

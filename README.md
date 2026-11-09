@@ -111,7 +111,17 @@ Commit `saturn_dev` afterwards.
    tabs. The header lives in `TabStripView` (`SetSaturnTodayHeader`) and is
    built in `vertical_tab_strip_region_view.cc`; collapsed, the stock rail and
    + button are unchanged. "Clear" is a hard-coded English string for now.
-   Not yet: a persistent Pinned list, the space label, bottom bar / spaces.
+6. **0006 sidebar phase 3 (spaces, Pinned list)** – a space is a Chromium
+   profile, so each space has its own cookies, favorites (pinned tabs) and
+   Pinned list. The sidebar shows the space name ("Primary" for the initial
+   profile) above the favorites; the Pinned list is the bookmark folder
+   `Other bookmarks/Pinned` of that profile (click opens or switches to the
+   page, right-click → Remove; tabs get "Add to Pinned list" in their context
+   menu; helpers in `chrome/browser/ui/tabs/saturn_pinned_folder.h`). The
+   bottom bar has Downloads, one dot per space (click switches: the target
+   space's window takes this window's place and this one minimizes) and +
+   (new space via the profile picker). Rename a space in its profile
+   settings. Strings are hard-coded English for now.
 
 ## Monthly update (release build)
 

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Sun, 8 Nov 2026 23:03:35 +0500
-Subject: [PATCH 3/5] Saturn: fix x64 component (dev) build with ungoogled's
+Subject: [PATCH 3/6] Saturn: fix x64 component (dev) build with ungoogled's
  clang
 
 The abseil DLL's export list names CordRepBtree::AddEdge<kFront>, which

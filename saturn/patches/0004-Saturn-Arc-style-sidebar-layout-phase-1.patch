@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Mon, 9 Nov 2026 11:42:49 +0500
-Subject: [PATCH 4/5] Saturn: Arc-style sidebar layout (phase 1)
+Subject: [PATCH 4/6] Saturn: Arc-style sidebar layout (phase 1)
 
 Vertical tabs on by default; toolbar (nav buttons, URL pill, sliders menu,
 sidebar toggle) moves into the 258px sidebar; 25px Saturn title bar; page
