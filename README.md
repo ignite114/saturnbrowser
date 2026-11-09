@@ -104,7 +104,14 @@ Commit `saturn_dev` afterwards.
    bar #161616, 38px tab rows, "New tab" row at 40%). Collapsing the sidebar
    (toggle or Ctrl+Shift+L) or fullscreen falls back to the stock layout.
    Sizes/colors live in `chrome/browser/ui/views/frame/saturn_sidebar_constants.h`.
-   Not yet: favorites grid, Pinned/Today, bottom bar / spaces.
+5. **0005 sidebar phase 2** – while expanded, Chromium's pinned tabs become a
+   3-column favorites grid (46px tiles, white 5%, no outline); a divider with
+   **Clear** (closes today's unpinned tabs, opening a fresh tab first if
+   nothing is pinned) and the New tab row sit between the grid and today's
+   tabs. The header lives in `TabStripView` (`SetSaturnTodayHeader`) and is
+   built in `vertical_tab_strip_region_view.cc`; collapsed, the stock rail and
+   + button are unchanged. "Clear" is a hard-coded English string for now.
+   Not yet: a persistent Pinned list, the space label, bottom bar / spaces.
 
 ## Monthly update (release build)
 

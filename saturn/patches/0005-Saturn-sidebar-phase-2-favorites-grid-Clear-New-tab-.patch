@@ -1,0 +1,431 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Mon, 9 Nov 2026 12:22:53 +0500
+Subject: [PATCH 5/5] Saturn: sidebar phase 2 - favorites grid, Clear, New tab
+ row
+
+While the sidebar is expanded, pinned tabs form a 3-column favorites grid
+(46px tiles, white 5%, no outline). A divider with Clear (closes today's
+unpinned tabs; opens a fresh tab first if nothing is pinned) and the New tab
+row sit between the grid and today's tabs. Collapsed, the stock rail and +
+button are unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../ui/views/frame/saturn_sidebar_constants.h |  14 +++
+ .../frame/vertical_tab_strip_region_view.cc   | 101 ++++++++++++++++++
+ .../tabs/common/pinned_tab_container_view.cc  |  22 ++--
+ .../ui/views/tabs/common/tab_strip_view.cc    |   7 ++
+ .../ui/views/tabs/common/tab_strip_view.h     |   6 ++
+ .../tabs/common/tab_strip_view_layout.cc      |  25 +++++
+ .../browser/ui/views/tabs/common/tab_view.cc  |   9 ++
+ .../tabs/common/vertical_tab_style_views.cc   |  15 ++-
+ 8 files changed, 189 insertions(+), 10 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+index 82feaea..ca7866d 100644
+--- a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -20,6 +20,20 @@ inline constexpr int kSidebarPadding = 10;
+ inline constexpr int kContentMargin = 10;
+ inline constexpr int kContentCornerRadius = 5;
+ 
++// Favorites grid (pinned tabs while the sidebar is expanded).
++inline constexpr int kFavoritesColumns = 3;
++inline constexpr int kFavoritesTileHeight = 46;
++inline constexpr int kFavoritesGap = 10;
++
++// "Today" header: divider + Clear, then the New tab row.
++inline constexpr int kTodayDividerRowHeight = 14;
++inline constexpr int kTodayClearWidth = 53;
++inline constexpr int kTodayNewTabTopGap = 3;
++inline constexpr int kTodayNewTabHeight = 34;
++inline constexpr int kTodayHeaderHeight =
++    kTodayDividerRowHeight + kTodayNewTabTopGap + kTodayNewTabHeight;
++inline constexpr int kTodayHeaderBottomGap = 5;
++
+ // Toolbar inside the sidebar.
+ inline constexpr int kSidebarButtonSize = 34;
+ inline constexpr int kSidebarButtonSpacing = 5;
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index ce4d357..fbcd178 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -41,6 +41,7 @@
+ #include "chrome/browser/ui/views/frame/custom_corners_background.h"
+ #include "chrome/browser/ui/views/frame/frame_separator.h"
+ #include "chrome/browser/ui/views/frame/safe_invoke/safe_invoke.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
+ #include "chrome/browser/ui/views/frame/shadow_frame_view.h"
+ #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+@@ -52,6 +53,14 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_view.h"
+ #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
++#include "chrome/browser/ui/views/tabs/shared/new_tab_button.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
++#include "ui/base/models/image_model.h"
++#include "ui/compositor/layer.h"
++#include "ui/views/background.h"
++#include "ui/views/controls/button/label_button.h"
+ #include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_focus_swipe_controller.h"
+@@ -85,6 +94,89 @@
+ 
+ namespace {
+ constexpr int kResizeAreaWidth = 5;
++
++// Saturn: closes today's (unpinned) tabs. When there are no favorites a fresh
++// New Tab is opened first so the window stays open.
++void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
++  TabStripModel* const model = browser->GetTabStripModel();
++  std::vector<content::WebContents*> to_close;
++  for (int i = model->IndexOfFirstNonPinnedTab(); i < model->count(); ++i) {
++    to_close.push_back(model->GetWebContentsAt(i));
++  }
++  if (to_close.empty()) {
++    return;
++  }
++  if (model->IndexOfFirstNonPinnedTab() == 0) {
++    chrome::NewTab(browser, NewTabTypes::kNewTabButton);
++  }
++  for (content::WebContents* contents : to_close) {
++    const int index = model->GetIndexOfWebContents(contents);
++    if (index != TabStripModel::kNoTab) {
++      model->CloseWebContentsAt(index, TabCloseTypes::CLOSE_USER_GESTURE);
++    }
++  }
++}
++
++// Saturn: the row above today's tabs: a divider with "Clear" on the right,
++// then a "New tab" row (shown while the sidebar is expanded).
++class SaturnTodayHeader : public views::View {
++  METADATA_HEADER(SaturnTodayHeader, views::View)
++
++ public:
++  explicit SaturnTodayHeader(BrowserWindowInterface* browser) {
++    const SkColor muted = SkColorSetARGB(0x80, 0xFF, 0xFF, 0xFF);
++
++    divider_ = AddChildView(std::make_unique<views::View>());
++    divider_->SetBackground(
++        views::CreateSolidBackground(SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF)));
++
++    auto clear = std::make_unique<views::LabelButton>(
++        base::BindRepeating(&SaturnClearTodayTabs, base::Unretained(browser)),
++        u"Clear");
++    clear->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(kArrowDownwardIcon, muted, 14));
++    clear->SetEnabledTextColors(muted);
++    clear->SetImageLabelSpacing(3);
++    clear->SetBorder(nullptr);
++    clear->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
++    clear->SetTooltipText(u"Close today's tabs");
++    clear_ = AddChildView(std::move(clear));
++
++    auto new_tab = std::make_unique<shared::NewTabButton>(
++        browser, saturn::kTodayNewTabHeight,
++        GetLayoutConstant(LayoutConstant::kVerticalTabStripButtonIconSize));
++    new_tab->SetShouldShowLabel(true);
++    new_tab->SetPaintTransparent(true);
++    new_tab_ = AddChildView(std::move(new_tab));
++    new_tab_->layer()->SetOpacity(0.4f);
++  }
++
++  // views::View:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(0, saturn::kTodayHeaderHeight);
++  }
++
++  void Layout(PassKey) override {
++    const int w = width();
++    const int row = saturn::kTodayDividerRowHeight;
++    clear_->SetBounds(std::max(0, w - saturn::kTodayClearWidth), 0,
++                      std::min(w, saturn::kTodayClearWidth), row);
++    divider_->SetBounds(
++        0, row / 2, std::max(0, w - saturn::kTodayClearWidth - 14), 1);
++    new_tab_->SetBounds(0, row + saturn::kTodayNewTabTopGap, w,
++                        saturn::kTodayNewTabHeight);
++  }
++
++ private:
++  raw_ptr<views::View> divider_ = nullptr;
++  raw_ptr<views::LabelButton> clear_ = nullptr;
++  raw_ptr<shared::NewTabButton> new_tab_ = nullptr;
++};
++
++BEGIN_METADATA(SaturnTodayHeader)
++END_METADATA
+ constexpr int kCollapsedResizeAreaWidth = 2;
+ constexpr int kKeyboardResizeWidth = 50;
+ constexpr int kSnapDistance = 15;
+@@ -855,6 +947,12 @@ void VerticalTabStripRegionView::RegionViewFocusListener::OnDidChangeFocus(
+ 
+ void VerticalTabStripRegionView::AddTabStripView(
+     std::unique_ptr<views::View> view) {
++  // Saturn: give the strip its "today" header (Clear + New tab row).
++  if (auto* const strip = views::AsViewClass<TabStripView>(view.get());
++      strip && !strip->saturn_today_header()) {
++    strip->SetSaturnTodayHeader(
++        std::make_unique<SaturnTodayHeader>(browser_view()->browser()));
++  }
+   view->SetProperty(
+       views::kFlexBehaviorKey,
+       views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToMinimum,
+@@ -911,6 +1009,9 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
+   // the collapsing state.
+   bool collapsed = state != tabs::VerticalTabStripCollapseState::kExpanded;
+ 
++  // Saturn: expanded, the New tab row lives in the strip's today header.
++  bottom_button_container_->SetVisible(collapsed);
++
+   resize_area_->SetVisible(!collapsed ||
+                            !state_controller_->IsExpandOnHoverEnabled() ||
+                            resize_area_->is_resizing());
+diff --git a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+index 37023b7..40d83ea 100644
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -17,6 +17,7 @@
+ #include "content/public/browser/navigation_controller.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
+ #include "ui/views/controls/scroll_view.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/layout/layout_types.h"
+@@ -377,6 +378,11 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+   int total_width = 0;
+   int total_height = 0;
+ 
++  // Saturn: while expanded, pinned tabs are a 3-column favorites grid.
++  const bool saturn_grid = GetTabStripCollapseState() ==
++                           tabs::VerticalTabStripCollapseState::kExpanded;
++  const int tab_padding = saturn_grid ? saturn::kFavoritesGap : kTabPadding;
++
+   int x = 0;
+   int y = 0;
+   int children_on_row = children.size();
+@@ -411,17 +417,18 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     // When we are in collapsed state, only one child should be shown per row.
+     // During collapse animation and other cases, fit as many as possible.
+     children_on_row =
+-        collapse_state == tabs::VerticalTabStripCollapseState::kCollapsed
++        saturn_grid ? saturn::kFavoritesColumns
++        : collapse_state == tabs::VerticalTabStripCollapseState::kCollapsed
+             ? 1
+             : std::min(
+                   children_on_row,
+                   static_cast<int>(std::floor((available_width - child_width) /
+-                                              (child_width + kTabPadding)) +
++                                              (child_width + tab_padding)) +
+                                    1));
+ 
+     // Allocate extra space to the tabs.
+     available_width -=
+-        (children_on_row * child_width) + (kTabPadding * (children_on_row - 1));
++        (children_on_row * child_width) + (tab_padding * (children_on_row - 1));
+     child_width += std::floor(available_width / children_on_row);
+   }
+ 
+@@ -430,6 +437,9 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     gfx::Rect bounds =
+         gfx::Rect(child->GetPreferredSize(views::SizeBounds(child_width, {})));
+     bounds.set_width(child_width);
++    if (saturn_grid) {
++      bounds.set_height(saturn::kFavoritesTileHeight);
++    }
+ 
+     auto drag_data = GetVisualDataForDraggedView(*child);
+     const bool should_show_child = !(drag_data && drag_data->should_hide);
+@@ -442,12 +452,12 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     bounds.set_x(drag_data ? drag_data->offset.x() : x);
+ 
+     if (row_index != 0) {
+-      bounds.set_x(bounds.x() + kTabPadding);
++      bounds.set_x(bounds.x() + tab_padding);
+     }
+ 
+     if (!drag_data || !drag_data->should_float) {
+       if (row_index != 0) {
+-        x += kTabPadding;
++        x += tab_padding;
+       }
+       x += bounds.width();
+       total_width = std::max(total_width, x);
+@@ -455,7 +465,7 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+ 
+       row_index++;
+       if (row_index >= children_on_row) {
+-        y = total_height + kTabPadding;
++        y = total_height + tab_padding;
+         row_index = 0;
+         x = 0;
+       }
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view.cc b/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
+index a6ac0cc..6bb39f4 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view.cc
+@@ -470,6 +470,13 @@ void TabStripView::SetCollapsedState(bool is_collapsed) {
+   }
+ }
+ 
++void TabStripView::SetSaturnTodayHeader(std::unique_ptr<views::View> header) {
++  CHECK(!saturn_today_header_);
++  saturn_today_header_ = AddChildViewAt(
++      std::move(header), *GetIndexOf(unpinned_tabs_scroll_view_));
++  InvalidateLayout();
++}
++
+ void TabStripView::SetIsAnimatingSize(bool is_animating) {
+   for (views::ScrollView* scroll_view :
+        {pinned_tabs_scroll_view_, unpinned_tabs_scroll_view_}) {
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view.h b/chrome/browser/ui/views/tabs/common/tab_strip_view.h
+index 145dbff..c323ecd 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view.h
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view.h
+@@ -59,6 +59,11 @@ class TabStripView final : public views::View,
+   }
+ 
+   void SetCollapsedState(bool is_collapsed);
++
++  // Saturn: a header (divider + Clear, New tab row) shown between the
++  // favorites grid and today's tabs while the vertical strip is expanded.
++  void SetSaturnTodayHeader(std::unique_ptr<views::View> header);
++  views::View* saturn_today_header() const { return saturn_today_header_; }
+   void SetIsAnimatingSize(bool is_animating);
+ 
+   bool IsPositionInWindowCaption(const gfx::Point& point);
+@@ -151,6 +156,7 @@ class TabStripView final : public views::View,
+   raw_ptr<UnpinnedTabContainerView> unpinned_tabs_container_view_ = nullptr;
+   raw_ptr<TabScrollButtonContainer> tab_scroll_button_container_ = nullptr;
+   bool is_collapsed_ = false;
++  raw_ptr<views::View> saturn_today_header_ = nullptr;
+ 
+   // Used for seek time metrics from the time the mouse enters the tabstrip.
+   std::optional<base::TimeTicks> mouse_entered_tabstrip_time_;
+diff --git a/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc b/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
+index d588f43..0909bcc 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_view_layout.cc
+@@ -9,6 +9,7 @@
+ #include "base/logging.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_node.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
+@@ -259,6 +260,15 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+                                      unpinned_preferred_height != 0 &&
+                                      is_collapsed;
+ 
++  // Saturn: the "today" header (divider + Clear, New tab row) sits between the
++  // favorites grid and today's tabs while expanded.
++  views::View* const today_header = tab_strip_view->saturn_today_header();
++  const bool show_today_header = today_header && !is_collapsed;
++  const int today_header_height =
++      show_today_header
++          ? saturn::kTodayHeaderHeight + saturn::kTodayHeaderBottomGap
++          : 0;
++
+   // If the height is bounded, calculate the available space for laying out the
+   // pinned and unpinned containers.
+   int remaining_height = 0;
+@@ -271,6 +281,7 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+       remaining_height -=
+           tabs_separator->GetPreferredSize().height() + region_vertical_padding;
+     }
++    remaining_height -= today_header_height;
+     // Clamp the remaining height to 0 if we have less space.
+     remaining_height = std::max(remaining_height, 0);
+   }
+@@ -317,6 +328,20 @@ views::ProposedLayout TabStripViewLayout::CalculateVerticalLayout(
+   layouts.child_layouts.emplace_back(tabs_separator, should_show_separator,
+                                      separator_bounds);
+ 
++  if (today_header) {
++    gfx::Rect header_bounds;
++    if (show_today_header) {
++      header_bounds = gfx::Rect(
++          region_horizontal_padding, y,
++          std::max(0, size_bounds.width().value() -
++                          2 * region_horizontal_padding),
++          saturn::kTodayHeaderHeight);
++      y += today_header_height;
++    }
++    layouts.child_layouts.emplace_back(today_header, show_today_header,
++                                       header_bounds);
++  }
++
+   // Place the unpinned container using the entire available width, we do not
+   // inset the x value by `region_horizontal_padding` here because, when the tab
+   // strip is collapsed, tab groups need to draw the group colored line in this
+diff --git a/chrome/browser/ui/views/tabs/common/tab_view.cc b/chrome/browser/ui/views/tabs/common/tab_view.cc
+index 61a57c1..7e3c1d4 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -87,6 +87,9 @@
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/background.h"
+ #include "ui/views/border.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/color_utils.h"
+ #include "ui/views/controls/button/button.h"
+ #include "ui/views/controls/focus_ring.h"
+ #include "ui/views/controls/highlight_path_generator.h"
+@@ -1229,6 +1232,12 @@ void TabView::UpdateBorder() {
+       // Insets for border handled by the `SplitTabView`.
+       SetBorder(views::CreateEmptyBorder(gfx::Insets(GetLayoutConstant(
+           LayoutConstant::kVerticalTabPinnedBorderThickness))));
++    } else if (GetColorProvider() &&
++               color_utils::IsDark(
++                   GetColorProvider()->GetColor(ui::kColorFrameActive))) {
++      // Saturn: favorites tiles have no outline on the dark sidebar.
++      SetBorder(views::CreateEmptyBorder(gfx::Insets(GetLayoutConstant(
++          LayoutConstant::kVerticalTabPinnedBorderThickness))));
+     } else {
+       SetBorder(views::CreateRoundedRectBorder(
+           GetLayoutConstant(LayoutConstant::kVerticalTabPinnedBorderThickness),
+diff --git a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+index d460dff..92b44cb 100644
+--- a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+@@ -201,9 +201,11 @@ bool VerticalTabStyleViews::ShouldPaintTabBackgroundColor(
+     return true;
+   }
+ 
+-  // Saturn: inactive rows sit directly on the sidebar.
++  // Saturn: inactive rows sit directly on the sidebar; favorites (pinned
++  // tabs) are always drawn as tiles.
+   if (UseSaturnTabColors(delegate_->GetView())) {
+-    return false;
++    const auto* tab_view = views::AsViewClass<TabView>(delegate_->GetView());
++    return tab_view && tab_view->pinned();
+   }
+ 
+   return delegate_->ShouldPaintTabBackgroundColor();
+@@ -217,10 +219,15 @@ SkColor VerticalTabStyleViews::GetCurrentTabBackgroundColor(
+         return SkColorSetARGB(0x33, 0xFF, 0xFF, 0xFF);
+       case TabStyle::TabSelectionState::kSelected:
+         return SkColorSetARGB(0x1F, 0xFF, 0xFF, 0xFF);
+-      case TabStyle::TabSelectionState::kInactive:
++      case TabStyle::TabSelectionState::kInactive: {
++        const auto* tab_view =
++            views::AsViewClass<TabView>(delegate_->GetView());
++        const int base = (tab_view && tab_view->pinned()) ? 0x0D : 0;
+         return SkColorSetARGB(
+-            base::ClampRound<uint8_t>(0x14 * delegate_->GetHoverAnimationValue()),
++            base::ClampRound<uint8_t>(
++                base + 0x14 * delegate_->GetHoverAnimationValue()),
+             0xFF, 0xFF, 0xFF);
++      }
+     }
+   }
+   const bool frame_glass = delegate_->IsGlassFrame();
