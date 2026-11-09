@@ -36,6 +36,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  chrome/app/vector_icons/saturn_sidebar.icon   |  25 +++++
  chrome/app/vector_icons/saturn_sliders.icon   |  45 +++++++++
  .../browser/ui/color/chrome_color_mixers.cc   |  11 ++-
+ .../bookmark_page_action_controller.cc        |   5 +-
  .../browser_desktop_window_tree_host_win.cc   |  20 +++-
  .../ui/views/frame/browser_frame_view_win.cc  |   3 +
  .../layout/browser_view_tabbed_layout_impl.cc |  26 ++++-
@@ -56,7 +57,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  .../installer/mini_installer/chrome.release   |   1 +
  ui/gfx/font_util.cc                           |  19 ++++
  ui/gfx/platform_font_skia.cc                  |   5 +
- 40 files changed, 866 insertions(+), 46 deletions(-)
+ 41 files changed, 870 insertions(+), 47 deletions(-)
  create mode 100644 chrome/app/saturn_fonts/Inter-Bold.ttf
  create mode 100644 chrome/app/saturn_fonts/Inter-LICENSE.txt
  create mode 100644 chrome/app/saturn_fonts/Inter-Medium.ttf
@@ -19751,6 +19752,23 @@ index 6227888..3d9216f 100644
    }
  
    if (key.custom_theme) {
+diff --git a/chrome/browser/ui/views/bookmarks/bookmark_page_action_controller.cc b/chrome/browser/ui/views/bookmarks/bookmark_page_action_controller.cc
+index ffe4536..67480b4 100644
+--- a/chrome/browser/ui/views/bookmarks/bookmark_page_action_controller.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_page_action_controller.cc
+@@ -130,8 +130,11 @@ void BookmarkPageActionController::UpdatePageActionVisibility() {
+ }
+ 
+ bool BookmarkPageActionController::ShouldShowPageAction() const {
++  // Saturn: no bookmark star in the URL pill (Figma); bookmarking stays on
++  // Ctrl+D and the app menu, and the sidebar has the Pinned list.
++  constexpr bool kSaturnShowStar = false;
+   const auto& url = tab().GetContents()->GetLastCommittedURL();
+-  return browser_defaults::bookmarks_enabled &&
++  return kSaturnShowStar && browser_defaults::bookmarks_enabled &&
+          edit_bookmarks_enabled_.GetValue() && url.is_valid() && !IsNTPUrl(url);
+ }
+ 
 diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
 index bf13db1..ab3feea 100644
 --- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc

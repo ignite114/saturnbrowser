@@ -132,7 +132,8 @@ Commit `saturn_dev` afterwards.
    sideloaded into DirectWrite at startup, and Inter becomes the default UI
    font. The app menu opens from the bottom-left settings button; the
    sliders button opens site settings (page info); the URL pill drops the
-   location icon and gets a copy-link button; Figma window controls.
+   location icon and the bookmark star and gets a copy-link button; Figma
+   window controls.
 
 ## Monthly update (release build)
 
