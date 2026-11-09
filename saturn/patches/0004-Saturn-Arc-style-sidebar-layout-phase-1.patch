@@ -1,0 +1,750 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Mon, 9 Nov 2026 11:42:49 +0500
+Subject: [PATCH 4/4] Saturn: Arc-style sidebar layout (phase 1)
+
+Vertical tabs on by default; toolbar (nav buttons, URL pill, sliders menu,
+sidebar toggle) moves into the 258px sidebar; 25px Saturn title bar; page
+shown as a rounded inset card; design colors, 38px tab rows, New tab row.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../browser/ui/color/chrome_color_mixers.cc   |  19 ++++
+ chrome/browser/ui/layout_constants.cc         |   6 +-
+ chrome/browser/ui/tabs/tab_strip_prefs.cc     |   3 +-
+ .../ui/tabs/vertical_tab_strip_state.h        |   3 +-
+ .../ui/views/frame/browser_frame_view_win.cc  |  34 +++++-
+ .../layout/browser_view_tabbed_layout_impl.cc |  73 +++++++++++-
+ .../ui/views/frame/saturn_sidebar_constants.h |  41 +++++++
+ .../frame/vertical_tab_strip_region_view.cc   |   9 +-
+ .../tabs/common/vertical_tab_style_views.cc   |  27 +++++
+ .../vertical_tab_strip_bottom_container.cc    |   7 ++
+ .../views/toolbar/browser_app_menu_button.cc  |  10 +-
+ .../browser/ui/views/toolbar/toolbar_view.cc  | 105 ++++++++++++++++++
+ .../browser/ui/views/toolbar/toolbar_view.h   |  14 +++
+ 13 files changed, 332 insertions(+), 19 deletions(-)
+ create mode 100644 chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+
+diff --git a/chrome/browser/ui/color/chrome_color_mixers.cc b/chrome/browser/ui/color/chrome_color_mixers.cc
+index 8432f49..6227888 100644
+--- a/chrome/browser/ui/color/chrome_color_mixers.cc
++++ b/chrome/browser/ui/color/chrome_color_mixers.cc
+@@ -23,7 +23,12 @@
+ #include "chrome/browser/ui/color/omnibox_color_mixer.h"
+ #include "chrome/browser/ui/color/product_specifications_color_mixer.h"
+ #include "chrome/browser/ui/color/tab_strip_color_mixer.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_mixer.h"
++#include "ui/color/color_provider.h"
+ #include "ui/color/color_provider_utils.h"
++#include "ui/color/color_recipe.h"
++#include "ui/color/color_transform.h"
+ 
+ namespace {
+ 
+@@ -88,6 +93,20 @@ void AddChromeColorMixers(ui::ColorProvider* provider,
+   // Must be the last one in order to override other mixer colors.
+   AddNativeChromeColorMixer(provider, key);
+ 
++  // Saturn: in dark mode the frame (sidebar + margins around the page card)
++  // uses the sidebar color from the design. Custom themes still win.
++  if (key.color_mode == ui::ColorProviderKey::ColorMode::kDark &&
++      !key.custom_theme) {
++    ui::ColorMixer& mixer = provider->AddMixer();
++    mixer[ui::kColorFrameActive] = {SkColorSetRGB(0x45, 0x45, 0x45)};
++    mixer[ui::kColorFrameInactive] = {SkColorSetRGB(0x45, 0x45, 0x45)};
++    // URL pill: white 5% (hover 8%) over the sidebar, as solid colors so the
++    // text field and its child views blend in.
++    mixer[kColorLocationBarBackground] = {SkColorSetRGB(0x4E, 0x4E, 0x4E)};
++    mixer[kColorLocationBarBackgroundHovered] = {
++        SkColorSetRGB(0x54, 0x54, 0x54)};
++  }
++
+   if (key.custom_theme) {
+     key.custom_theme->AddColorMixers(provider, key);
+   }
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index b8206dc..03d1f4a 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -157,10 +157,12 @@ int GetLayoutConstant(LayoutConstant constant) {
+       return 20;
+     case LayoutConstant::kMainBackgroundRegionCornerRadius:
+     case LayoutConstant::kToolbarCornerRadius:
+-    case LayoutConstant::kVerticalTabCornerRadius:
+       return 8;
++    // Saturn: sidebar rows are 38px with 10px corners.
++    case LayoutConstant::kVerticalTabCornerRadius:
++      return 10;
+     case LayoutConstant::kVerticalTabHeight:
+-      return 30;
++      return 38;
+     case LayoutConstant::kVerticalTabPinnedHeight:
+       return 32;
+     case LayoutConstant::kVerticalTabMinWidth:
+diff --git a/chrome/browser/ui/tabs/tab_strip_prefs.cc b/chrome/browser/ui/tabs/tab_strip_prefs.cc
+index 9a85574..711d3a9 100644
+--- a/chrome/browser/ui/tabs/tab_strip_prefs.cc
++++ b/chrome/browser/ui/tabs/tab_strip_prefs.cc
+@@ -25,7 +25,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(prefs::kOrganizerPanelPinnedToTabstrip, true);
+   registry->RegisterBooleanPref(prefs::kEverythingMenuPinnedToTabstrip, true);
+   registry->RegisterBooleanPref(prefs::kTabScrollButtonsPinnedToTabstrip, true);
+-  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);
++  // Saturn: the sidebar (vertical tabs) is the default layout.
++  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, true);
+   registry->RegisterBooleanPref(prefs::kVerticalTabsExpandOnHoverEnabled, true);
+   registry->RegisterBooleanPref(prefs::kVerticalTabsEnabledFirstTime, false);
+   registry->RegisterBooleanPref(prefs::kVerticalTabsCollapsedState, false);
+diff --git a/chrome/browser/ui/tabs/vertical_tab_strip_state.h b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+index 62ea6d7..6e0b2bb 100644
+--- a/chrome/browser/ui/tabs/vertical_tab_strip_state.h
++++ b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+@@ -7,7 +7,8 @@
+ 
+ namespace tabs {
+ 
+-inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 240;
++// Saturn: 258 matches the sidebar design (238 content + 2x10 padding).
++inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 258;
+ // TODO(crbug.com/465833741): Replace constant with derived value based on
+ // caption buttons.
+ inline constexpr int kVerticalTabStripUncollapsedMinWidth = 126;
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.cc b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+index 5bafadd..52f6c2a 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "chrome/browser/ui/views/frame/browser_frame_view_win.h"
+ 
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "chrome/grit/branded_strings.h"
++#include "ui/gfx/color_utils.h"
++
+ #include <dwmapi.h>
+ 
+ #include <algorithm>
+@@ -117,7 +121,9 @@ BrowserFrameViewWin::BrowserFrameViewWin(BrowserWidget* widget,
+ 
+   // If this is a web app window, the window title will be part of the
+   // BrowserView and thus we don't need to create another one here.
+-  if (!browser_view->GetIsWebAppType() && supports_title_bar) {
++  // Saturn: tabbed windows get a title label too (shown with vertical tabs).
++  if (!browser_view->GetIsWebAppType() &&
++      (supports_title_bar || browser_view->GetSupportsTabStrip())) {
+     window_title_ = new views::Label(browser_view->GetWindowTitle());
+     window_title_->SetSubpixelRenderingEnabled(false);
+     window_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+@@ -166,8 +172,16 @@ bool BrowserFrameViewWin::CaptionButtonsOnLeadingEdge() const {
+   return false;
+ }
+ 
++// Saturn: with vertical tabs the window gets a thin title bar showing the
++// product name; the sidebar and page sit below it.
++static bool UseSaturnTitlebar(const BrowserView* browser_view) {
++  return browser_view->ShouldDrawVerticalTabStrip() &&
++         !browser_view->IsFullscreen();
++}
++
+ int BrowserFrameViewWin::GetTopInset(bool restored) const {
+-  if (GetBrowserView()->GetTabStripVisible()) {
++  if (GetBrowserView()->GetTabStripVisible() &&
++      !UseSaturnTitlebar(GetBrowserView())) {
+     return TopAreaHeight(restored);
+   }
+   return TitlebarHeight(restored);
+@@ -547,7 +561,7 @@ int BrowserFrameViewWin::TitlebarMaximizedVisualHeight() const {
+   constexpr int kVerticalPadding = 2;
+   const auto toolbar_height =
+       GetClientFrameElementInfo().toolbar_minimum_height;
+-  if (toolbar_height > 0) {
++  if (toolbar_height > 0 && !UseSaturnTitlebar(GetBrowserView())) {
+     maximized_height =
+         std::max(maximized_height, toolbar_height + kVerticalPadding);
+   }
+@@ -604,11 +618,19 @@ bool BrowserFrameViewWin::ShouldShowWindowTitle(TitlebarType type) const {
+   if (browser_widget()->IsFullscreen()) {
+     return false;
+   }
++  if (UseSaturnTitlebar(GetBrowserView())) {
++    return true;
++  }
+   return GetBrowserView()->ShouldShowWindowTitle();
+ }
+ 
+ SkColor BrowserFrameViewWin::GetTitlebarColor() const {
+-  return GetFrameColor(BrowserFrameActiveState::kUseCurrent);
++  const SkColor frame_color =
++      GetFrameColor(BrowserFrameActiveState::kUseCurrent);
++  if (UseSaturnTitlebar(GetBrowserView()) && color_utils::IsDark(frame_color)) {
++    return saturn::kTitlebarColor;
++  }
++  return frame_color;
+ }
+ 
+ void BrowserFrameViewWin::PaintTitlebar(gfx::Canvas* canvas) const {
+@@ -716,7 +738,9 @@ void BrowserFrameViewWin::LayoutTitleBar() {
+   }
+ 
+   if (show_title && window_title_) {
+-    window_title_->SetText(GetBrowserView()->GetWindowTitle());
++    window_title_->SetText(UseSaturnTitlebar(GetBrowserView())
++                               ? l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)
++                               : GetBrowserView()->GetWindowTitle());
+     const int max_text_width = std::max(0, next_trailing_x - next_leading_x);
+     LayoutWebAppWindowTitle(
+         gfx::Rect(next_leading_x, window_icon_bounds.y(), max_text_width,
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index 7764d4a..0aa8fe0 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -39,6 +39,9 @@
+ #include "chrome/browser/ui/views/frame/shadow_frame_view.h"
+ #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_background_blur_backdrop.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "ui/color/color_id.h"
++#include "ui/views/background.h"
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
+ #include "chrome/browser/ui/views/side_panel/side_panel.h"
+@@ -225,6 +228,10 @@ struct BrowserViewTabbedLayoutImpl::TransientLayoutData {
+   VerticalTabStripAnimation vertical_tab_strip_animation;
+   SeparatorInfo separator_info;
+   SidePanelContentAnimation side_panel_content_animation;
++  // Saturn: the toolbar is laid out at the top of the expanded vertical tab
++  // strip and the page becomes an inset card. Must match
++  // ToolbarView::IsSaturnSidebarLayout().
++  bool saturn_sidebar = false;
+ 
+   double vertical_tabs_top_corner() const {
+     double top_corner = vertical_tab_strip_animation.top_corner;
+@@ -974,6 +981,33 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+             0, horizontal_layout.vertical_tab_strip_width, 0, 0));
+       }
+     }
++    // Saturn: put the top container (toolbar) at the top of the sidebar and
++    // the tab list below it; inset the page so it reads as a card.
++    if (layout_data_->saturn_sidebar && !vertical_tab_strip_bounds.IsEmpty()) {
++      auto& top_container_layout =
++          layout.AddChild(views().top_container, gfx::Rect());
++      BrowserLayoutParams sidebar_params;
++      sidebar_params.visual_client_area = vertical_tab_strip_bounds;
++      sidebar_params.visual_client_area.Inset(gfx::Insets::TLBR(
++          saturn::kSidebarPadding, saturn::kSidebarPadding, 0,
++          saturn::kSidebarPadding));
++      const gfx::Rect local_bounds = CalculateTopContainerLayout(
++          top_container_layout,
++          sidebar_params.InLocalCoordinates(sidebar_params.visual_client_area),
++          /*needs_exclusion=*/false);
++      top_container_layout.bounds =
++          GetTopContainerBoundsInParent(local_bounds, sidebar_params);
++      const int tabs_top = top_container_layout.bounds.bottom() +
++                           saturn::kSidebarToolbarBottomGap;
++      vertical_tab_strip_bounds.Inset(gfx::Insets::TLBR(
++          std::max(0, tabs_top - vertical_tab_strip_bounds.y()), 0, 0, 0));
++      params.Inset(gfx::Insets::TLBR(saturn::kContentMargin, 0,
++                                     saturn::kContentMargin,
++                                     saturn::kContentMargin));
++      unclipped_contents_region.Inset(gfx::Insets::TLBR(
++          saturn::kContentMargin, 0, saturn::kContentMargin,
++          saturn::kContentMargin));
++    }
+     layout.AddChild(views().vertical_tab_strip_region_view,
+                     vertical_tab_strip_bounds,
+                     layout_data_->tab_strip_type == TabStripType::kVertical);
+@@ -996,7 +1030,7 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+     const double top_corner = layout_data_->vertical_tabs_top_corner();
+     const bool top_corner_visible =
+         layout_data_->tab_strip_type == TabStripType::kVertical &&
+-        top_corner > 0.0;
++        !layout_data_->saturn_sidebar && top_corner > 0.0;
+ 
+     // The top corner is drawn when the tabstrip goes all the way to the top.
+     if (top_corner_visible) {
+@@ -1019,7 +1053,7 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+     const double bottom_corner = layout_data_->vertical_tabs_bottom_corner();
+     const bool bottom_corner_visible =
+         layout_data_->tab_strip_type == TabStripType::kVertical &&
+-        bottom_corner > 0.0;
++        !layout_data_->saturn_sidebar && bottom_corner > 0.0;
+     if (bottom_corner_visible) {
+       auto preferred =
+           views().vertical_tab_strip_bottom_corner->GetPreferredSize();
+@@ -1038,6 +1072,7 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+   // When the tabstrip isn't at the top or in constrained widths, the top
+   // container is laid out before all side panels.
+   if (horizontal_layout.force_top_container_to_top &&
++      !layout_data_->saturn_sidebar &&
+       IsParentedTo(views().top_container, views().browser_view)) {
+     auto& top_container_layout =
+         layout.AddChild(views().top_container, gfx::Rect());
+@@ -1174,6 +1209,7 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+   // toolbar-height side panel with a horizontal tabstrip if the browser is wide
+   // enough.
+   if (!horizontal_layout.force_top_container_to_top &&
++      !layout_data_->saturn_sidebar &&
+       IsParentedTo(views().top_container, views().browser_view)) {
+     auto& top_container_layout =
+         layout.AddChild(views().top_container, gfx::Rect());
+@@ -1496,6 +1532,11 @@ void BrowserViewTabbedLayoutImpl::ConfigureTopContainerBackground(
+     const BrowserLayoutParams& params,
+     CustomCornersBackground* background) {
+   CHECK(layout_data_);
++  // Saturn: in the sidebar the toolbar sits directly on the sidebar color.
++  if (layout_data_->saturn_sidebar) {
++    background->SetVisible(false);
++    return;
++  }
+   // The top container always draws an opaque background in tabbed browser mode
+   // to avoid cracking between visual elements.
+   background->SetVisible(true);
+@@ -1572,10 +1613,28 @@ void BrowserViewTabbedLayoutImpl::DoPreLayoutComputations(
+   layout_data_->separator_info = CalculateSeparatorInfo();
+   layout_data_->side_panel_content_animation =
+       CalculateSidePanelContentAnimation();
++  layout_data_->saturn_sidebar =
++      layout_data_->tab_strip_type == TabStripType::kVertical &&
++      (layout_data_->window_state == WindowState::kNormal ||
++       layout_data_->window_state == WindowState::kMaximized) &&
++      !delegate().IsVerticalTabStripCollapsed() &&
++      delegate().IsToolbarVisible() &&
++      IsParentedTo(views().top_container, views().browser_view);
+ }
+ 
+ void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
+     const BrowserLayoutParams& params) {
++  // Saturn: in the sidebar layout the browser view itself shows the sidebar
++  // color behind the toolbar and around the page card. Other layouts leave it
++  // transparent so the frame (and theme images) show through.
++  views::View* const browser_view = views().browser_view;
++  if (layout_data_->saturn_sidebar && !browser_view->background()) {
++    browser_view->SetBackground(
++        views::CreateSolidBackground(ui::kColorFrameActive));
++  } else if (!layout_data_->saturn_sidebar && browser_view->background()) {
++    browser_view->SetBackground(nullptr);
++  }
++
+   // If the window goes out of glass mode, these changes won't hurt anything.
+   if (in_glass_mode()) {
+     gfx::RoundedCornersF content_corners;
+@@ -1595,6 +1654,16 @@ void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
+     views().multi_contents_view->SetBackgroundRadii(content_corners);
+   }
+ 
++  // Saturn: the page is a card with rounded corners inside the sidebar color.
++  const gfx::RoundedCornersF saturn_corners(saturn::kContentCornerRadius);
++  if (layout_data_->saturn_sidebar) {
++    views().multi_contents_view->SetBackgroundRadii(saturn_corners);
++  } else if (!in_glass_mode() &&
++             views().multi_contents_view->GetBackgroundRadii() ==
++                 saturn_corners) {
++    views().multi_contents_view->SetBackgroundRadii(gfx::RoundedCornersF());
++  }
++
+   // Want to cut the vertical tabstrip and its decorations out of the top
+   // container in transparency mode.
+   CustomCornersBackground::Cutouts top_container_cutout_views;
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+new file mode 100644
+index 0000000..82feaea
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_SIDEBAR_CONSTANTS_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_SIDEBAR_CONSTANTS_H_
++
++#include "third_party/skia/include/core/SkColor.h"
++
++// Saturn's Arc-style sidebar (Figma "Custom OS", node 4097:334).
++//
++// When vertical tabs are shown, Saturn uses a thin native title bar, and while
++// the vertical tab strip is expanded the toolbar moves into the sidebar as two
++// rows: [back forward reload ... sidebar-toggle menu] over the URL pill. The
++// page is drawn as an inset card next to the sidebar.
++namespace saturn {
++
++// Sidebar inner padding (left/right/top) and the gap around the page card.
++inline constexpr int kSidebarPadding = 10;
++inline constexpr int kContentMargin = 10;
++inline constexpr int kContentCornerRadius = 5;
++
++// Toolbar inside the sidebar.
++inline constexpr int kSidebarButtonSize = 34;
++inline constexpr int kSidebarButtonSpacing = 5;
++inline constexpr int kSidebarRowGap = 8;
++inline constexpr int kSidebarUrlPillHeight = 38;
++inline constexpr int kSidebarUrlPillRadius = 10;
++inline constexpr int kSidebarToolbarBottomGap = 8;
++inline constexpr int kSidebarToolbarHeight =
++    kSidebarButtonSize + kSidebarRowGap + kSidebarUrlPillHeight;
++
++// Colors (dark design).
++inline constexpr SkColor kSidebarColor = SkColorSetRGB(0x45, 0x45, 0x45);
++inline constexpr SkColor kTitlebarColor = SkColorSetRGB(0x16, 0x16, 0x16);
++// White at 5% over the sidebar, for the URL pill.
++inline constexpr SkColor kUrlPillColor = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
++
++}  // namespace saturn
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_SIDEBAR_CONSTANTS_H_
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index f3ab4f1..ce4d357 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -427,8 +427,13 @@ views::ProposedLayout VerticalTabStripRegionView::CalculateProposedLayout(
+     button_available_size.set_width(button_available_size.width() -
+                                     2 * horizontal_padding);
+   }
++  const bool saturn_hide_header =
++      !state_controller_->IsCollapsed() && GetWidget() &&
++      !GetWidget()->IsFullscreen();
+   const gfx::Size button_size =
+-      top_button_container_->GetPreferredSize(button_available_size);
++      saturn_hide_header
++          ? gfx::Size()
++          : top_button_container_->GetPreferredSize(button_available_size);
+   const gfx::Size tab_strip_size =
+       tab_strip_view() ? tab_strip_view()->GetPreferredSize() : gfx::Size();
+   const gfx::Size organizer_panel_size =
+@@ -453,7 +458,7 @@ views::ProposedLayout VerticalTabStripRegionView::CalculateProposedLayout(
+   // Lay out the top button container.
+   layout.child_layouts.push_back(
+       {.child_view = top_button_container_.get(),
+-       .visible = true,
++       .visible = !saturn_hide_header,
+        .bounds = gfx::Rect(
+            horizontal_padding, 0,
+            blending_with_organizer_tray
+diff --git a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+index dd7a0a8..d460dff 100644
+--- a/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+@@ -19,12 +19,22 @@
+ #include "third_party/skia/include/core/SkPath.h"
+ #include "third_party/skia/include/core/SkRRect.h"
+ #include "ui/base/theme_provider.h"
++#include "base/numerics/safe_conversions.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
+ #include "ui/gfx/canvas.h"
++#include "ui/gfx/color_utils.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
+ #include "ui/gfx/scoped_canvas.h"
+ #include "ui/views/view_utils.h"
+ #include "ui/views/widget/widget.h"
+ 
++// Saturn: true when the sidebar is dark (no light theme / custom image).
++static bool UseSaturnTabColors(const views::View* view) {
++  const ui::ColorProvider* cp = view->GetColorProvider();
++  return cp && color_utils::IsDark(cp->GetColor(ui::kColorFrameActive));
++}
++
+ VerticalTabStyleViews::VerticalTabStyleViews(
+     std::unique_ptr<TabStyleViewDelegate> delegate)
+     : delegate_(std::move(delegate)) {
+@@ -191,11 +201,28 @@ bool VerticalTabStyleViews::ShouldPaintTabBackgroundColor(
+     return true;
+   }
+ 
++  // Saturn: inactive rows sit directly on the sidebar.
++  if (UseSaturnTabColors(delegate_->GetView())) {
++    return false;
++  }
++
+   return delegate_->ShouldPaintTabBackgroundColor();
+ }
+ 
+ SkColor VerticalTabStyleViews::GetCurrentTabBackgroundColor(
+     TabStyle::TabSelectionState selection_state) const {
++  if (UseSaturnTabColors(delegate_->GetView())) {
++    switch (selection_state) {
++      case TabStyle::TabSelectionState::kActive:
++        return SkColorSetARGB(0x33, 0xFF, 0xFF, 0xFF);
++      case TabStyle::TabSelectionState::kSelected:
++        return SkColorSetARGB(0x1F, 0xFF, 0xFF, 0xFF);
++      case TabStyle::TabSelectionState::kInactive:
++        return SkColorSetARGB(
++            base::ClampRound<uint8_t>(0x14 * delegate_->GetHoverAnimationValue()),
++            0xFF, 0xFF, 0xFF);
++    }
++  }
+   const bool frame_glass = delegate_->IsGlassFrame();
+   return tab_style()->GetCurrentTabBackgroundColor(
+       selection_state, delegate_->IsHoverAnimationActive(),
+diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+index 64150f8..feaf9ea 100644
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+@@ -11,6 +11,7 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/new_tab_button.h"
+ #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
++#include "ui/compositor/layer.h"
+ #include "ui/actions/actions.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/views/view_class_properties.h"
+@@ -39,6 +40,8 @@ VerticalTabStripBottomContainer::VerticalTabStripBottomContainer(
+       new_tab_button->RegisterWillInvokeActionCallback(
+           record_new_tab_button_pressed);
+ 
++  // Saturn: expanded, the button is a "New tab" row (icon + label).
++  new_tab_button->SetShouldShowLabel(true);
+   new_tab_button_ = AddChildView(std::move(new_tab_button));
+ 
+   OnCollapseStateChanged(state_controller->GetCollapseState());
+@@ -105,6 +108,10 @@ void VerticalTabStripBottomContainer::UpdateButtonStyles(bool collapsed) {
+   new_tab_button_->SetInsets(GetLayoutInsets(
+       collapsed ? LayoutInset::VERTICAL_TAB_STRIP_BOTTOM_BUTTON_COLLAPSED
+                 : LayoutInset::VERTICAL_TAB_STRIP_BOTTOM_BUTTON_UNCOLLAPSED));
++
++  // Saturn: expanded, a transparent left-aligned row at 40% opacity.
++  new_tab_button_->SetPaintTransparent(!collapsed);
++  new_tab_button_->layer()->SetOpacity(collapsed ? 1.0f : 0.4f);
+ }
+ 
+ BEGIN_METADATA(VerticalTabStripBottomContainer)
+diff --git a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+index e0a1557..b6c9b37 100644
+--- a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
++++ b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/views/toolbar/browser_app_menu_button.h"
+ 
++#include "components/vector_icons/vector_icons.h"
++
+ #include <set>
+ 
+ #include "base/feature_list.h"
+@@ -151,12 +153,8 @@ void BrowserAppMenuButton::UpdateThemeBasedState() {
+ }
+ 
+ void BrowserAppMenuButton::UpdateIcon() {
+-  const gfx::VectorIcon& icon =
+-      ui::TouchUiController::Get()->touch_ui()
+-          ? features::IsRoundedIconsEnabled() ? kMoreVertIcon
+-                                              : kBrowserToolsTouchOldIcon
+-      : features::IsRoundedIconsEnabled() ? kMoreVertIcon
+-                                          : kBrowserToolsChromeRefreshOldIcon;
++  // Saturn: the app menu is the sidebar's "sliders" button.
++  const gfx::VectorIcon& icon = vector_icons::kTuneIcon;
+   const int icon_size = GetIconSize();
+ 
+   for (auto state : kButtonStates) {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index 86228a6..d37ccbb 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -22,6 +22,7 @@
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "chrome/app/chrome_command_ids.h"
++#include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/actor/ui/actor_ui_metrics.h"
+ #include "chrome/browser/command_updater.h"
+ #include "chrome/browser/glic/browser_ui/activity_list_bubble/glic_activity_list_bubble.h"
+@@ -80,6 +81,7 @@
+ #include "chrome/browser/ui/views/extensions/extensions_toolbar_coordinator.h"
+ #include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
+ #include "chrome/browser/ui/views/frame/custom_corners_background.h"
+ #include "chrome/browser/ui/views/frame/top_container_view.h"
+ #include "chrome/browser/ui/views/glic/glic_button_interface.h"
+@@ -638,6 +640,23 @@ void ToolbarView::Init() {
+     app_menu_button_ = AddChildView(std::move(app_menu_button));
+   }
+ 
++  // Saturn: sidebar toggle. Positioned by LayoutSaturnSidebar() only.
++  {
++    auto toggle = std::make_unique<ToolbarButton>(base::BindRepeating(
++        [](BrowserWindowInterface* browser) {
++          if (auto* controller =
++                  tabs::VerticalTabStripStateController::From(browser)) {
++            controller->RequestCollapse(true);
++          }
++        },
++        base::Unretained(browser_.get())));
++    toggle->SetVectorIcon(kDockToLeftIcon);
++    toggle->SetTooltipText(u"Hide sidebar (Ctrl+Shift+L)");
++    toggle->GetViewAccessibility().SetName(u"Hide sidebar");
++    toggle->SetProperty(views::kViewIgnoredByLayoutKey, true);
++    saturn_sidebar_toggle_ = AddChildView(std::move(toggle));
++  }
++
+   if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) &&
+       contextual_tasks::GetExpandButtonOption() ==
+           contextual_tasks::ExpandButtonOption::kToolbarCloseButton) {
+@@ -693,6 +712,10 @@ void ToolbarView::Init() {
+                                 base::Unretained(this)));
+     should_display_vertical_tabs_ =
+         vertical_tab_strip_state_controller->ShouldDisplayVerticalTabs();
++    saturn_collapse_subscription_ =
++        vertical_tab_strip_state_controller->RegisterOnCollapseChanged(
++            base::BindRepeating(&ToolbarView::OnSaturnSidebarCollapseChanged,
++                                base::Unretained(this)));
+   }
+   if (glic::GlicEnabling::IsProfileEligible(browser_view_->GetProfile())) {
+     UpdateGlicButtonVisibility();
+@@ -743,6 +766,8 @@ void ToolbarView::OnVerticalTabStripModeChanged(
+   // etc) re-evaluate their visibility against the final toolbar width, clearing
+   // out any zeroed out state from intermediate layout passes.
+   InvalidateLayout();
++  // Saturn: the toolbar's height depends on the sidebar layout.
++  PreferredSizeChanged();
+ }
+ 
+ std::unique_ptr<GlicAndActorButtonsContainer>
+@@ -1417,6 +1442,10 @@ gfx::Size ToolbarView::CalculatePreferredSize(
+       size = location_bar_->PreferredSize();
+       break;
+     case DisplayMode::kNormal:
++      if (IsSaturnSidebarLayout()) {
++        size = gfx::Size(0, saturn::kSidebarToolbarHeight);
++        break;
++      }
+       size = AccessiblePaneView::CalculatePreferredSize(available_size);
+       // Because there are odd cases where something causes one of the views in
+       // the toolbar to report an unreasonable height (see crbug.com/41471763),
+@@ -1445,6 +1474,10 @@ gfx::Size ToolbarView::GetMinimumSize() const {
+       size = location_bar_->MinimumSize();
+       break;
+     case DisplayMode::kNormal:
++      if (IsSaturnSidebarLayout()) {
++        size = gfx::Size(0, saturn::kSidebarToolbarHeight);
++        break;
++      }
+       size = AccessiblePaneView::GetMinimumSize();
+       // Because there are odd cases where something causes one of the views in
+       // the toolbar to report an unreasonable height (see crbug.com/41471763),
+@@ -1488,6 +1521,21 @@ void ToolbarView::Layout(PassKey) {
+     return;
+   }
+ 
++  const bool saturn_sidebar =
++      display_mode_ == DisplayMode::kNormal && IsSaturnSidebarLayout();
++  if (display_mode_ == DisplayMode::kNormal && background()) {
++    if (auto* bg = background()->AsA<CustomCornersBackground>()) {
++      bg->SetVisible(!saturn_sidebar);
++    }
++  }
++  if (saturn_sidebar) {
++    LayoutSaturnSidebar();
++    return;
++  }
++  if (saturn_sidebar_toggle_) {
++    saturn_sidebar_toggle_->SetBoundsRect(gfx::Rect());
++  }
++
+   if (display_mode_ == DisplayMode::kNormal) {
+     LayoutCommon();
+   }
+@@ -1557,6 +1605,63 @@ void ToolbarView::ChildVisibilityChanged(views::View* child) {
+ ////////////////////////////////////////////////////////////////////////////////
+ // ToolbarView, private:
+ 
++bool ToolbarView::IsSaturnSidebarLayout() const {
++  return browser_view_ && should_display_vertical_tabs_ &&
++         location_bar_view_ && browser_view_->ShouldDrawVerticalTabStrip() &&
++         !browser_view_->IsVerticalTabStripCollapsed() &&
++         !browser_view_->IsFullscreen();
++}
++
++void ToolbarView::LayoutSaturnSidebar() {
++  constexpr int kSize = saturn::kSidebarButtonSize;
++  constexpr int kStep = kSize + saturn::kSidebarButtonSpacing;
++
++  // Everything not placed below gets no space in the sidebar; the app menu
++  // (behind the sliders icon) covers extensions, profile, bookmarks, etc.
++  // Park them far off-screen: some have their own layers, which a zero-size
++  // rect at the origin would not hide.
++  for (views::View* child : children()) {
++    child->SetBoundsRect(gfx::Rect(-10000, -10000, 0, 0));
++  }
++
++  // Row 1, leading: back, forward, reload.
++  int x = 0;
++  for (views::View* button :
++       std::array<views::View*, 3>{back_, forward_, reload_}) {
++    if (!button) {
++      continue;
++    }
++    button->SetVisible(true);
++    button->SetBoundsRect(gfx::Rect(x, 0, kSize, kSize));
++    x += kStep;
++  }
++
++  // Row 1, trailing: [sidebar toggle] [menu].
++  int trailing = width();
++  for (views::View* button : std::array<views::View*, 2>{
++           app_menu_button_, saturn_sidebar_toggle_}) {
++    if (!button) {
++      continue;
++    }
++    button->SetVisible(true);
++    trailing -= kSize;
++    button->SetBoundsRect(gfx::Rect(trailing, 0, kSize, kSize));
++    trailing -= saturn::kSidebarButtonSpacing;
++  }
++
++  // Row 2: the URL pill.
++  location_bar_view_->SetVisible(true);
++  location_bar_view_->SetBoundsRect(
++      gfx::Rect(0, kSize + saturn::kSidebarRowGap, width(),
++                saturn::kSidebarUrlPillHeight));
++}
++
++void ToolbarView::OnSaturnSidebarCollapseChanged(
++    tabs::VerticalTabStripCollapseState) {
++  InvalidateLayout();
++  PreferredSizeChanged();
++}
++
+ // Override this so that when the user presses F6 to rotate toolbar panes,
+ // the location bar gets focus, not the first control in the toolbar - and
+ // also so that it selects all content in the location bar.
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+index e10dc91..f8e43d3 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -89,6 +89,10 @@ enum class ExpansionMode {
+ };
+ 
+ // The Browser Window's toolbar.
++namespace tabs {
++enum class VerticalTabStripCollapseState;
++}  // namespace tabs
++
+ class ToolbarView : public views::AccessiblePaneView,
+                     public ui::AcceleratorProvider,
+                     public views::AnimationDelegateViews,
+@@ -373,6 +377,12 @@ class ToolbarView : public views::AccessiblePaneView,
+ 
+   void SetForwardButtonVisibility(bool visible);
+ 
++  // Saturn: while vertical tabs are shown and expanded, the toolbar lives in
++  // the sidebar as two rows (buttons over the URL pill).
++  bool IsSaturnSidebarLayout() const;
++  void LayoutSaturnSidebar();
++  void OnSaturnSidebarCollapseChanged(tabs::VerticalTabStripCollapseState);
++
+   gfx::Size GetBackForwardButtonSize(bool minimum_size = false) const;
+ 
+   std::unique_ptr<glic::ToolbarGlicButton> CreateGlicButton();
+@@ -497,6 +507,10 @@ class ToolbarView : public views::AccessiblePaneView,
+   // Subscription for when tab strip mode changes
+   base::CallbackListSubscription vertical_tab_subscription_;
+ 
++  // Saturn: hides the sidebar; only visible in the sidebar layout.
++  raw_ptr<ToolbarButton> saturn_sidebar_toggle_ = nullptr;
++  base::CallbackListSubscription saturn_collapse_subscription_;
++
+   // Subscription for when contextual tasks button position should update.
+   base::CallbackListSubscription
+       contextual_tasks_button_position_subscription_;

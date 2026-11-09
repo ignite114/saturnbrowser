@@ -96,6 +96,15 @@ Commit `saturn_dev` afterwards.
    from abseil's x64 `.def` files; ungoogled's clang inlines it, so the
    `out\Dev` component build failed to link. Release builds don't use `.def`
    files. Drop this patch once upstream's `.def` matches again.
+4. **0004 sidebar layout (phase 1)** – Arc-style sidebar built on Chromium's
+   native vertical tabs (on by default, 258px). The toolbar (back/forward/
+   reload, sidebar toggle, sliders = app menu, URL pill) moves into the
+   sidebar; a 25px "Saturn" title bar; the page is a card with 10px margins and
+   5px corners; dark-mode colors from the Figma design (sidebar #454545, title
+   bar #161616, 38px tab rows, "New tab" row at 40%). Collapsing the sidebar
+   (toggle or Ctrl+Shift+L) or fullscreen falls back to the stock layout.
+   Sizes/colors live in `chrome/browser/ui/views/frame/saturn_sidebar_constants.h`.
+   Not yet: favorites grid, Pinned/Today, bottom bar / spaces.
 
 ## Monthly update (release build)
 
