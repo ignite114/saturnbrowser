@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Tue, 10 Nov 2026 02:02:10 +0500
+Subject: [PATCH 8/8] Saturn: Figma-style text rendering on Windows
+
+Unhinted outlines, grayscale anti-aliasing (no ClearType), subpixel
+positioning and no extra contrast boost, for the browser UI and web pages,
+independent of the system's ClearType settings.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../fonts/win/font_platform_data_win.cc       |  3 ++
+ ui/gfx/font_render_params_win.cc              | 33 +++++++------------
+ 2 files changed, 15 insertions(+), 21 deletions(-)
+
+diff --git a/third_party/blink/renderer/platform/fonts/win/font_platform_data_win.cc b/third_party/blink/renderer/platform/fonts/win/font_platform_data_win.cc
+index dd8f660..fa7e000 100644
+--- a/third_party/blink/renderer/platform/fonts/win/font_platform_data_win.cc
++++ b/third_party/blink/renderer/platform/fonts/win/font_platform_data_win.cc
+@@ -66,6 +66,9 @@ SkFont FontPlatformData::CreateSkFont(const FontDescription*) const {
+   // away from adjacent glyphs. We avoid this by linking the two flags.
+   if (use_anti_alias) {
+     font.setSubpixel(true);
++    // Saturn: unhinted outlines (Figma-style text), see
++    // gfx::GetFontRenderParams() on Windows.
++    font.setHinting(SkFontHinting::kNone);
+   }
+ 
+   if (WebTestSupport::IsRunningWebTest() &&
+diff --git a/ui/gfx/font_render_params_win.cc b/ui/gfx/font_render_params_win.cc
+index 968bb2b..4d2d53f 100644
+--- a/ui/gfx/font_render_params_win.cc
++++ b/ui/gfx/font_render_params_win.cc
+@@ -28,7 +28,8 @@ namespace gfx {
+ 
+ namespace {
+ 
+-FontRenderParams::SubpixelRendering GetSubpixelRenderingGeometry() {
++[[maybe_unused]] FontRenderParams::SubpixelRendering
++GetSubpixelRenderingGeometry() {
+   DWORD pixel_structure;
+   base::win::RegKey key = FontUtilWin::GetTextSettingsRegistryKey();
+   if (key.Valid() &&
+@@ -82,26 +83,16 @@ class CachedFontRenderParams {
+     params_->hinting = FontRenderParams::HINTING_MEDIUM;
+     params_->subpixel_rendering = FontRenderParams::SUBPIXEL_RENDERING_NONE;
+ 
+-    BOOL enabled = false;
+-    if (SystemParametersInfo(SPI_GETFONTSMOOTHING, 0, &enabled, 0) && enabled) {
+-      params_->antialiasing = true;
+-      params_->subpixel_positioning = true;
+-
+-      UINT type = 0;
+-      if (SystemParametersInfo(SPI_GETFONTSMOOTHINGTYPE, 0, &type, 0) &&
+-          type == FE_FONTSMOOTHINGCLEARTYPE) {
+-        params_->subpixel_rendering = GetSubpixelRenderingGeometry();
+-      }
+-    }
+-
+-    if (base::FeatureList::IsEnabled(
+-            features::kUseGammaContrastRegistrySettings)) {
+-      params_->text_contrast = FontUtilWin::GetContrastFromRegistry();
+-      params_->text_gamma = FontUtilWin::GetGammaFromRegistry();
+-    } else {
+-      params_->text_contrast = SK_GAMMA_CONTRAST;
+-      params_->text_gamma = SK_GAMMA_EXPONENT;
+-    }
++    // Saturn: "Figma-style" text everywhere (UI and web pages), independent
++    // of the system's ClearType settings: unhinted outlines, grayscale
++    // anti-aliasing, subpixel positioning and no extra contrast boost (as on
++    // macOS). See also blink's FontPlatformData::CreateSkFont() on Windows.
++    params_->antialiasing = true;
++    params_->subpixel_positioning = true;
++    params_->hinting = FontRenderParams::HINTING_NONE;
++    params_->subpixel_rendering = FontRenderParams::SUBPIXEL_RENDERING_NONE;
++    params_->text_contrast = 0.0f;
++    params_->text_gamma = SK_GAMMA_EXPONENT;
+ 
+     skia::LegacyDisplayGlobals::SetCachedParams(
+         FontRenderParams::SubpixelRenderingToSkiaPixelGeometry(

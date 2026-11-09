@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Sun, 8 Nov 2026 23:00:08 +0500
-Subject: [PATCH 2/7] Saturn: saturn:// internal URL scheme
+Subject: [PATCH 2/8] Saturn: saturn:// internal URL scheme
 
 saturn:// is the user-facing name of chrome://. Internally pages stay
 chrome:// (WebUI, permissions, policies keep working); only the edges

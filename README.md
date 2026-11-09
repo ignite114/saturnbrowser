@@ -134,6 +134,12 @@ Commit `saturn_dev` afterwards.
    sliders button opens site settings (page info); the URL pill drops the
    location icon and the bookmark star and gets a copy-link button; Figma
    window controls.
+8. **0008 Figma-style text** – text is drawn like Figma/macOS instead of
+   Windows' default: unhinted outlines, grayscale anti-aliasing (no ClearType
+   color fringes), subpixel positioning, no contrast boost. Set in
+   `ui/gfx/font_render_params_win.cc` (browser UI, GPU, renderer prefs) and
+   blink's `win/font_platform_data_win.cc` (web pages); ignores the system
+   ClearType settings.
 
 ## Monthly update (release build)
 
