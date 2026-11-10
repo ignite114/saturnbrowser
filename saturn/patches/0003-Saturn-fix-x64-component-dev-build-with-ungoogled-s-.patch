@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 65ee9af0dc7072cd477e6bce93b4adb90a8286ba Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Sun, 8 Nov 2026 23:03:35 +0500
-Subject: [PATCH 03/11] Saturn: fix x64 component (dev) build with ungoogled's
+Subject: [PATCH 03/12] Saturn: fix x64 component (dev) build with ungoogled's
  clang
 
 The abseil DLL's export list names CordRepBtree::AddEdge<kFront>, which
@@ -37,3 +37,6 @@ index 01e8a6e..0c826fe 100644
      ??$AddEdge@$0A@@CordRepBtree@cord_internal@absl@@QEAA?AUOpResult@012@_NPEAUCordRep@12@_K@Z
      ??$AllocateBackingArray@$07V?$allocator@D@__Cr@std@@@container_internal@absl@@YAPEAXPEAX_K@Z
      ??$Append@V?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@$0A@@Cord@absl@@QEAAX$$QEAV?$basic_string@DU?$char_traits@D@__Cr@std@@V?$allocator@D@23@@__Cr@std@@@Z
+-- 
+2.56.0.windows.4
+

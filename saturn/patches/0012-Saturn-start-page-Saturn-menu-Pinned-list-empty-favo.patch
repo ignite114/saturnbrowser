@@ -1,0 +1,3531 @@
+From a980ebf9b771e0ec8bf4d4205a3ad12b50d4b5e9 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Wed, 11 Nov 2026 01:45:58 +0500
+Subject: [PATCH 12/12] Saturn: start page, Saturn menu (Pinned list), empty
+ favourites slot while dragging
+
+- saturn://start: see-through start page (50% black) with a search box and
+  the animated dot-art planet; shown at launch, for new tabs and when the
+  last tab closes.
+- saturn::ShowMenu(): blurred 196px menu with icons, dividers, disabled rows
+  and submenus; used for the Pinned list (Copy Link, Rename Tab, Mute,
+  Edit Pinned page, Duplicate, Move to, Remove Pin).
+- Store: custom item names, editable item URLs, moving items between spaces.
+- Dragging a tab shows the favourites' empty slot right away.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chrome/app/vector_icons/BUILD.gn              |  10 +
+ .../vector_icons/saturn_menu_copy_link.icon   |  36 ++
+ .../saturn_menu_delete_pinned_tab.icon        |  37 ++
+ .../vector_icons/saturn_menu_dropright.icon   |  13 +
+ .../vector_icons/saturn_menu_duplicate.icon   |  44 ++
+ .../saturn_menu_edit_pinned_page.icon         |  29 +
+ .../vector_icons/saturn_menu_edit_url.icon    |  25 +
+ .../vector_icons/saturn_menu_mute_tab.icon    |  37 ++
+ .../vector_icons/saturn_menu_rename_tab.icon  |  25 +
+ .../vector_icons/saturn_menu_unmute_tab.icon  |  41 ++
+ .../vector_icons/saturn_menu_update_url.icon  |  29 +
+ .../browser/chrome_content_browser_client.cc  |   4 +
+ chrome/browser/ui/tabs/saturn_store.cc        |  58 +-
+ chrome/browser/ui/tabs/saturn_store.h         |  16 +
+ chrome/browser/ui/tabs/tab_strip_model.cc     |   4 +-
+ chrome/browser/ui/views/frame/BUILD.gn        |   8 +-
+ .../ui/views/frame/contents_web_view.cc       |  26 +-
+ .../ui/views/frame/contents_web_view.h        |   2 +
+ chrome/browser/ui/views/frame/saturn_menu.cc  | 528 +++++++++++++++++
+ chrome/browser/ui/views/frame/saturn_menu.h   |  56 ++
+ .../frame/vertical_tab_strip_region_view.cc   | 251 +++++++-
+ .../frame/vertical_tab_strip_region_view.h    |   3 +
+ chrome/browser/ui/views/toolbar/BUILD.gn      |   3 +
+ .../ui/views/toolbar/saturn_url_pill.cc       |  31 +-
+ .../ui/views/toolbar/saturn_url_pill.h        |   9 +
+ .../browser/ui/webui/chrome_web_ui_configs.cc |   4 +
+ .../ui/webui/saturn_start/resources/_ink.txt  |  31 +
+ .../webui/saturn_start/resources/search.svg   |  11 +
+ .../ui/webui/saturn_start/resources/start.css |  84 +++
+ .../webui/saturn_start/resources/start.html   |  23 +
+ .../ui/webui/saturn_start/resources/start.js  | 390 +++++++++++++
+ .../saturn_start/resources/start_tail.js      | 358 ++++++++++++
+ .../ui/webui/saturn_start/saturn_start_page.h | 536 ++++++++++++++++++
+ .../ui/webui/saturn_start/saturn_start_ui.cc  | 180 ++++++
+ .../ui/webui/saturn_start/saturn_start_ui.h   |  34 ++
+ 35 files changed, 2961 insertions(+), 15 deletions(-)
+ create mode 100644 chrome/app/vector_icons/saturn_menu_copy_link.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_delete_pinned_tab.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_dropright.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_duplicate.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_edit_pinned_page.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_edit_url.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_mute_tab.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_rename_tab.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_unmute_tab.icon
+ create mode 100644 chrome/app/vector_icons/saturn_menu_update_url.icon
+ create mode 100644 chrome/browser/ui/views/frame/saturn_menu.cc
+ create mode 100644 chrome/browser/ui/views/frame/saturn_menu.h
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/_ink.txt
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/search.svg
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/start.css
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/start.html
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/start.js
+ create mode 100644 chrome/browser/ui/webui/saturn_start/resources/start_tail.js
+ create mode 100644 chrome/browser/ui/webui/saturn_start/saturn_start_page.h
+ create mode 100644 chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc
+ create mode 100644 chrome/browser/ui/webui/saturn_start/saturn_start_ui.h
+
+diff --git a/chrome/app/vector_icons/BUILD.gn b/chrome/app/vector_icons/BUILD.gn
+index df4b599..44f12e5 100644
+--- a/chrome/app/vector_icons/BUILD.gn
++++ b/chrome/app/vector_icons/BUILD.gn
+@@ -115,6 +115,16 @@ aggregate_vector_icons("chrome_vector_icons") {
+     "dock_to_left.icon",
+     "saturn_back.icon",
+     "saturn_clear.icon",
++    "saturn_menu_copy_link.icon",
++    "saturn_menu_delete_pinned_tab.icon",
++    "saturn_menu_dropright.icon",
++    "saturn_menu_duplicate.icon",
++    "saturn_menu_edit_pinned_page.icon",
++    "saturn_menu_edit_url.icon",
++    "saturn_menu_mute_tab.icon",
++    "saturn_menu_rename_tab.icon",
++    "saturn_menu_unmute_tab.icon",
++    "saturn_menu_update_url.icon",
+     "saturn_logo.icon",
+     "saturn_sound_off.icon",
+     "saturn_sound_on.icon",
+diff --git a/chrome/app/vector_icons/saturn_menu_copy_link.icon b/chrome/app/vector_icons/saturn_menu_copy_link.icon
+new file mode 100644
+index 0000000..597832d
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_copy_link.icon
+@@ -0,0 +1,36 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 5.8333f, 8.0565f,
++CUBIC_TO, 5.8333f, 7.467f, 6.0675f, 6.9017f, 6.4843f, 6.4849f,
++CUBIC_TO, 6.9011f, 6.0681f, 7.4664f, 5.834f, 8.0558f, 5.834f,
++H_LINE_TO, 15.2775f,
++CUBIC_TO, 15.5693f, 5.834f, 15.8583f, 5.8915f, 16.128f, 6.0032f,
++CUBIC_TO, 16.3976f, 6.1148f, 16.6426f, 6.2786f, 16.849f, 6.4849f,
++CUBIC_TO, 17.0554f, 6.6913f, 17.2191f, 6.9363f, 17.3308f, 7.206f,
++CUBIC_TO, 17.4425f, 7.4756f, 17.5f, 7.7646f, 17.5f, 8.0565f,
++V_LINE_TO, 15.2782f,
++CUBIC_TO, 17.5f, 15.57f, 17.4425f, 15.859f, 17.3308f, 16.1287f,
++CUBIC_TO, 17.2191f, 16.3983f, 17.0554f, 16.6433f, 16.849f, 16.8497f,
++CUBIC_TO, 16.6426f, 17.0561f, 16.3976f, 17.2198f, 16.128f, 17.3315f,
++CUBIC_TO, 15.8583f, 17.4432f, 15.5693f, 17.5007f, 15.2775f, 17.5007f,
++H_LINE_TO, 8.0558f,
++CUBIC_TO, 7.764f, 17.5007f, 7.4749f, 17.4432f, 7.2053f, 17.3315f,
++CUBIC_TO, 6.9356f, 17.2198f, 6.6906f, 17.0561f, 6.4843f, 16.8497f,
++CUBIC_TO, 6.2779f, 16.6433f, 6.1142f, 16.3983f, 6.0025f, 16.1287f,
++CUBIC_TO, 5.8908f, 15.859f, 5.8333f, 15.57f, 5.8333f, 15.2782f,
++V_LINE_TO, 8.0565f,
++CLOSE,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 3.3433f, 13.9475f,
++CUBIC_TO, 3.0878f, 13.8018f, 2.8752f, 13.5912f, 2.7271f, 13.3371f,
++CUBIC_TO, 2.5791f, 13.0829f, 2.5007f, 12.7942f, 2.5f, 12.5f,
++V_LINE_TO, 4.1667f,
++CUBIC_TO, 2.5f, 3.25f, 3.25f, 2.5f, 4.1667f, 2.5f,
++H_LINE_TO, 12.5f,
++CUBIC_TO, 13.125f, 2.5f, 13.465f, 2.8208f, 13.75f, 3.3333f,
+diff --git a/chrome/app/vector_icons/saturn_menu_delete_pinned_tab.icon b/chrome/app/vector_icons/saturn_menu_delete_pinned_tab.icon
+new file mode 100644
+index 0000000..711934a
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_delete_pinned_tab.icon
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 3.3333f, 5.834f,
++H_LINE_TO, 16.6666f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 8.3333f, 9.166f,
++V_LINE_TO, 14.166f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 11.6667f, 9.166f,
++V_LINE_TO, 14.166f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 4.1667f, 5.834f,
++LINE_TO, 5, 15.834f,
++CUBIC_TO, 5, 16.276f, 5.1756f, 16.6999f, 5.4882f, 17.0125f,
++CUBIC_TO, 5.8007f, 17.3251f, 6.2247f, 17.5007f, 6.6667f, 17.5007f,
++H_LINE_TO, 13.3334f,
++CUBIC_TO, 13.7754f, 17.5007f, 14.1993f, 17.3251f, 14.5119f, 17.0125f,
++CUBIC_TO, 14.8244f, 16.6999f, 15, 16.276f, 15, 15.834f,
++LINE_TO, 15.8334f, 5.834f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 7.5f, 5.8333f,
++V_LINE_TO, 3.3333f,
++CUBIC_TO, 7.5f, 3.1123f, 7.5878f, 2.9004f, 7.7441f, 2.7441f,
++CUBIC_TO, 7.9004f, 2.5878f, 8.1123f, 2.5f, 8.3333f, 2.5f,
++H_LINE_TO, 11.6667f,
++CUBIC_TO, 11.8877f, 2.5f, 12.0996f, 2.5878f, 12.2559f, 2.7441f,
++CUBIC_TO, 12.4122f, 2.9004f, 12.5f, 3.1123f, 12.5f, 3.3333f,
++V_LINE_TO, 5.8333f,
+diff --git a/chrome/app/vector_icons/saturn_menu_dropright.icon b/chrome/app/vector_icons/saturn_menu_dropright.icon
+new file mode 100644
+index 0000000..7e1a235
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_dropright.icon
+@@ -0,0 +1,13 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 24,
++STROKE, 1.5f,
++MOVE_TO, 10, 16,
++LINE_TO, 14, 12,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 10, 8,
++LINE_TO, 14, 12,
+diff --git a/chrome/app/vector_icons/saturn_menu_duplicate.icon b/chrome/app/vector_icons/saturn_menu_duplicate.icon
+new file mode 100644
+index 0000000..a0453f1
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_duplicate.icon
+@@ -0,0 +1,44 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 5.8333f, 8.0565f,
++CUBIC_TO, 5.8333f, 7.467f, 6.0675f, 6.9017f, 6.4843f, 6.4849f,
++CUBIC_TO, 6.9011f, 6.0681f, 7.4664f, 5.834f, 8.0558f, 5.834f,
++H_LINE_TO, 15.2775f,
++CUBIC_TO, 15.5693f, 5.834f, 15.8583f, 5.8915f, 16.128f, 6.0032f,
++CUBIC_TO, 16.3976f, 6.1148f, 16.6426f, 6.2786f, 16.849f, 6.4849f,
++CUBIC_TO, 17.0554f, 6.6913f, 17.2191f, 6.9363f, 17.3308f, 7.206f,
++CUBIC_TO, 17.4425f, 7.4756f, 17.5f, 7.7646f, 17.5f, 8.0565f,
++V_LINE_TO, 15.2782f,
++CUBIC_TO, 17.5f, 15.57f, 17.4425f, 15.859f, 17.3308f, 16.1287f,
++CUBIC_TO, 17.2191f, 16.3983f, 17.0554f, 16.6433f, 16.849f, 16.8497f,
++CUBIC_TO, 16.6426f, 17.0561f, 16.3976f, 17.2198f, 16.128f, 17.3315f,
++CUBIC_TO, 15.8583f, 17.4432f, 15.5693f, 17.5007f, 15.2775f, 17.5007f,
++H_LINE_TO, 8.0558f,
++CUBIC_TO, 7.764f, 17.5007f, 7.4749f, 17.4432f, 7.2053f, 17.3315f,
++CUBIC_TO, 6.9356f, 17.2198f, 6.6906f, 17.0561f, 6.4843f, 16.8497f,
++CUBIC_TO, 6.2779f, 16.6433f, 6.1142f, 16.3983f, 6.0025f, 16.1287f,
++CUBIC_TO, 5.8908f, 15.859f, 5.8333f, 15.57f, 5.8333f, 15.2782f,
++V_LINE_TO, 8.0565f,
++CLOSE,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 9.1667f, 11.666f,
++H_LINE_TO, 14.1667f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 11.6667f, 9.166f,
++V_LINE_TO, 14.166f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 3.3433f, 13.9475f,
++CUBIC_TO, 3.0875f, 13.8021f, 2.8747f, 13.5916f, 2.7266f, 13.3374f,
++CUBIC_TO, 2.5785f, 13.0832f, 2.5003f, 12.7942f, 2.5f, 12.5f,
++V_LINE_TO, 4.1667f,
++CUBIC_TO, 2.5f, 3.25f, 3.25f, 2.5f, 4.1667f, 2.5f,
++H_LINE_TO, 12.5f,
++CUBIC_TO, 13.125f, 2.5f, 13.465f, 2.8208f, 13.75f, 3.3333f,
+diff --git a/chrome/app/vector_icons/saturn_menu_edit_pinned_page.icon b/chrome/app/vector_icons/saturn_menu_edit_pinned_page.icon
+new file mode 100644
+index 0000000..80f8767
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_edit_pinned_page.icon
+@@ -0,0 +1,29 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 7.5f, 12.5f,
++LINE_TO, 12.5f, 7.5f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 9.1667f, 5.0009f,
++LINE_TO, 9.5525f, 4.5542f,
++CUBIC_TO, 10.334f, 3.7729f, 11.3939f, 3.3339f, 12.4991f, 3.334f,
++CUBIC_TO, 13.6042f, 3.3341f, 14.664f, 3.7731f, 15.4454f, 4.5547f,
++CUBIC_TO, 16.2268f, 5.3362f, 16.6658f, 6.3961f, 16.6657f, 7.5012f,
++CUBIC_TO, 16.6656f, 8.6063f, 16.2265f, 9.6662f, 15.445f, 10.4476f,
++LINE_TO, 15, 10.8342f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 10.8334f, 15.0013f,
++LINE_TO, 10.5025f, 15.4463f,
++CUBIC_TO, 9.7119f, 16.2281f, 8.6449f, 16.6666f, 7.5329f, 16.6666f,
++CUBIC_TO, 6.4211f, 16.6666f, 5.354f, 16.2281f, 4.5634f, 15.4463f,
++CUBIC_TO, 4.1737f, 15.061f, 3.8643f, 14.6022f, 3.6531f, 14.0964f,
++CUBIC_TO, 3.442f, 13.5907f, 3.3333f, 13.0481f, 3.3333f, 12.5001f,
++CUBIC_TO, 3.3333f, 11.952f, 3.442f, 11.4094f, 3.6531f, 10.9037f,
++CUBIC_TO, 3.8643f, 10.398f, 4.1737f, 9.9391f, 4.5634f, 9.5538f,
++LINE_TO, 5, 9.168f,
+diff --git a/chrome/app/vector_icons/saturn_menu_edit_url.icon b/chrome/app/vector_icons/saturn_menu_edit_url.icon
+new file mode 100644
+index 0000000..40bb86c
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_edit_url.icon
+@@ -0,0 +1,25 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 3.3333f, 16.6663f,
++H_LINE_TO, 6.6666f,
++LINE_TO, 15.4166f, 7.9163f,
++CUBIC_TO, 15.6355f, 7.6974f, 15.8091f, 7.4376f, 15.9276f, 7.1516f,
++CUBIC_TO, 16.046f, 6.8656f, 16.107f, 6.5591f, 16.107f, 6.2496f,
++CUBIC_TO, 16.107f, 5.9401f, 16.046f, 5.6336f, 15.9276f, 5.3476f,
++CUBIC_TO, 15.8091f, 5.0616f, 15.6355f, 4.8018f, 15.4166f, 4.5829f,
++CUBIC_TO, 15.1978f, 4.3641f, 14.9379f, 4.1905f, 14.652f, 4.072f,
++CUBIC_TO, 14.366f, 3.9535f, 14.0595f, 3.8926f, 13.75f, 3.8926f,
++CUBIC_TO, 13.4405f, 3.8926f, 13.134f, 3.9535f, 12.848f, 4.072f,
++CUBIC_TO, 12.562f, 4.1905f, 12.3022f, 4.3641f, 12.0833f, 4.5829f,
++LINE_TO, 3.3333f, 13.3329f,
++V_LINE_TO, 16.6663f,
++CLOSE,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 11.25f, 5.416f,
++LINE_TO, 14.5833f, 8.7493f,
+diff --git a/chrome/app/vector_icons/saturn_menu_mute_tab.icon b/chrome/app/vector_icons/saturn_menu_mute_tab.icon
+new file mode 100644
+index 0000000..6e0ce68
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_mute_tab.icon
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 5, 12.5002f,
++H_LINE_TO, 3.3333f,
++CUBIC_TO, 3.1123f, 12.5002f, 2.9004f, 12.4124f, 2.7441f, 12.2561f,
++CUBIC_TO, 2.5878f, 12.0998f, 2.5f, 11.8879f, 2.5f, 11.6668f,
++V_LINE_TO, 8.3335f,
++CUBIC_TO, 2.5f, 8.1125f, 2.5878f, 7.9005f, 2.7441f, 7.7443f,
++CUBIC_TO, 2.9004f, 7.588f, 3.1123f, 7.5002f, 3.3333f, 7.5002f,
++H_LINE_TO, 5,
++LINE_TO, 7.9167f, 3.7502f,
++CUBIC_TO, 7.9895f, 3.6087f, 8.1105f, 3.4979f, 8.2579f, 3.4379f,
++CUBIC_TO, 8.4053f, 3.3779f, 8.5693f, 3.3726f, 8.7202f, 3.4229f,
++CUBIC_TO, 8.8712f, 3.4732f, 8.9992f, 3.5759f, 9.081f, 3.7123f,
++CUBIC_TO, 9.1629f, 3.8487f, 9.1933f, 4.01f, 9.1667f, 4.1669f,
++V_LINE_TO, 15.8335f,
++CUBIC_TO, 9.1933f, 15.9904f, 9.1629f, 16.1516f, 9.081f, 16.2881f,
++CUBIC_TO, 8.9992f, 16.4245f, 8.8712f, 16.5272f, 8.7202f, 16.5775f,
++CUBIC_TO, 8.5693f, 16.6278f, 8.4053f, 16.6225f, 8.2579f, 16.5624f,
++CUBIC_TO, 8.1105f, 16.5024f, 7.9895f, 16.3917f, 7.9167f, 16.2502f,
++LINE_TO, 5, 12.5002f,
++CLOSE,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 13.3333f, 8.334f,
++LINE_TO, 15, 10.0007f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 16.6666f, 11.6673f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 16.6666f, 8.334f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 13.3333f, 11.6673f,
+diff --git a/chrome/app/vector_icons/saturn_menu_rename_tab.icon b/chrome/app/vector_icons/saturn_menu_rename_tab.icon
+new file mode 100644
+index 0000000..40bb86c
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_rename_tab.icon
+@@ -0,0 +1,25 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 3.3333f, 16.6663f,
++H_LINE_TO, 6.6666f,
++LINE_TO, 15.4166f, 7.9163f,
++CUBIC_TO, 15.6355f, 7.6974f, 15.8091f, 7.4376f, 15.9276f, 7.1516f,
++CUBIC_TO, 16.046f, 6.8656f, 16.107f, 6.5591f, 16.107f, 6.2496f,
++CUBIC_TO, 16.107f, 5.9401f, 16.046f, 5.6336f, 15.9276f, 5.3476f,
++CUBIC_TO, 15.8091f, 5.0616f, 15.6355f, 4.8018f, 15.4166f, 4.5829f,
++CUBIC_TO, 15.1978f, 4.3641f, 14.9379f, 4.1905f, 14.652f, 4.072f,
++CUBIC_TO, 14.366f, 3.9535f, 14.0595f, 3.8926f, 13.75f, 3.8926f,
++CUBIC_TO, 13.4405f, 3.8926f, 13.134f, 3.9535f, 12.848f, 4.072f,
++CUBIC_TO, 12.562f, 4.1905f, 12.3022f, 4.3641f, 12.0833f, 4.5829f,
++LINE_TO, 3.3333f, 13.3329f,
++V_LINE_TO, 16.6663f,
++CLOSE,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 11.25f, 5.416f,
++LINE_TO, 14.5833f, 8.7493f,
+diff --git a/chrome/app/vector_icons/saturn_menu_unmute_tab.icon b/chrome/app/vector_icons/saturn_menu_unmute_tab.icon
+new file mode 100644
+index 0000000..5a92fd5
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_unmute_tab.icon
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 12.5f, 6.666f,
++CUBIC_TO, 13.0175f, 7.0541f, 13.4375f, 7.5574f, 13.7268f, 8.136f,
++CUBIC_TO, 14.0161f, 8.7145f, 14.1667f, 9.3525f, 14.1667f, 9.9993f,
++CUBIC_TO, 14.1667f, 10.6462f, 14.0161f, 11.2842f, 13.7268f, 11.8627f,
++CUBIC_TO, 13.4375f, 12.4413f, 13.0175f, 12.9446f, 12.5f, 13.3327f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 14.75f, 4.166f,
++CUBIC_TO, 15.62f, 4.8691f, 16.3217f, 5.7578f, 16.8037f, 6.7671f,
++CUBIC_TO, 17.2858f, 7.7764f, 17.536f, 8.8808f, 17.536f, 9.9993f,
++CUBIC_TO, 17.536f, 11.1179f, 17.2858f, 12.2223f, 16.8037f, 13.2316f,
++CUBIC_TO, 16.3217f, 14.2409f, 15.62f, 15.1296f, 14.75f, 15.8327f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 5, 12.5002f,
++H_LINE_TO, 3.3333f,
++CUBIC_TO, 3.1123f, 12.5002f, 2.9004f, 12.4124f, 2.7441f, 12.2561f,
++CUBIC_TO, 2.5878f, 12.0998f, 2.5f, 11.8879f, 2.5f, 11.6668f,
++V_LINE_TO, 8.3335f,
++CUBIC_TO, 2.5f, 8.1125f, 2.5878f, 7.9005f, 2.7441f, 7.7443f,
++CUBIC_TO, 2.9004f, 7.588f, 3.1123f, 7.5002f, 3.3333f, 7.5002f,
++H_LINE_TO, 5,
++LINE_TO, 7.9167f, 3.7502f,
++CUBIC_TO, 7.9895f, 3.6087f, 8.1105f, 3.4979f, 8.2579f, 3.4379f,
++CUBIC_TO, 8.4053f, 3.3779f, 8.5693f, 3.3726f, 8.7202f, 3.4229f,
++CUBIC_TO, 8.8712f, 3.4732f, 8.9992f, 3.5759f, 9.081f, 3.7123f,
++CUBIC_TO, 9.1629f, 3.8487f, 9.1933f, 4.01f, 9.1667f, 4.1669f,
++V_LINE_TO, 15.8335f,
++CUBIC_TO, 9.1933f, 15.9904f, 9.1629f, 16.1516f, 9.081f, 16.2881f,
++CUBIC_TO, 8.9992f, 16.4245f, 8.8712f, 16.5272f, 8.7202f, 16.5775f,
++CUBIC_TO, 8.5693f, 16.6278f, 8.4053f, 16.6225f, 8.2579f, 16.5624f,
++CUBIC_TO, 8.1105f, 16.5024f, 7.9895f, 16.3917f, 7.9167f, 16.2502f,
++LINE_TO, 5, 12.5002f,
++CLOSE,
+diff --git a/chrome/app/vector_icons/saturn_menu_update_url.icon b/chrome/app/vector_icons/saturn_menu_update_url.icon
+new file mode 100644
+index 0000000..44486fa
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_menu_update_url.icon
+@@ -0,0 +1,29 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 16.6666f, 9.1666f,
++CUBIC_TO, 16.4628f, 7.7001f, 15.7825f, 6.3413f, 14.7305f, 5.2995f,
++CUBIC_TO, 13.6785f, 4.2577f, 12.3131f, 3.5907f, 10.8447f, 3.4012f,
++CUBIC_TO, 9.3763f, 3.2117f, 7.8863f, 3.5103f, 6.6043f, 4.251f,
++CUBIC_TO, 5.3223f, 4.9916f, 4.3194f, 6.1332f, 3.75f, 7.4999f,
++MOVE_TO, 3.75f, 7.4999f,
++H_LINE_TO, 3.3333f,
++V_LINE_TO, 4.1666f,
++MOVE_TO, 3.75f, 7.4999f,
++H_LINE_TO, 6.6666f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 3.3333f, 10.834f,
++CUBIC_TO, 3.5371f, 12.3005f, 4.2174f, 13.6593f, 5.2694f, 14.7011f,
++CUBIC_TO, 6.3215f, 15.7429f, 7.6868f, 16.4099f, 9.1553f, 16.5994f,
++CUBIC_TO, 10.6237f, 16.7888f, 12.1136f, 16.4902f, 13.3956f, 15.7496f,
++CUBIC_TO, 14.6777f, 15.009f, 15.6806f, 13.8674f, 16.25f, 12.5007f,
++MOVE_TO, 16.25f, 12.5007f,
++H_LINE_TO, 16.6666f,
++V_LINE_TO, 15.834f,
++MOVE_TO, 16.25f, 12.5007f,
++H_LINE_TO, 13.3333f,
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 7e1a3ae..3f1d9bd 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -5183,6 +5183,10 @@ static bool HandleSaturnSchemeRewrite(GURL* url,
+     replacements.SetSchemeStr(content::kChromeUIScheme);
+     *url = url->ReplaceComponents(replacements);
+   }
++  // The new tab page is Saturn's start page.
++  if (url->SchemeIs(content::kChromeUIScheme) && url->host() == "newtab") {
++    *url = GURL("chrome://start/");
++  }
+   return false;
+ }
+ 
+diff --git a/chrome/browser/ui/tabs/saturn_store.cc b/chrome/browser/ui/tabs/saturn_store.cc
+index e426917..d7f4df3 100644
+--- a/chrome/browser/ui/tabs/saturn_store.cc
++++ b/chrome/browser/ui/tabs/saturn_store.cc
+@@ -66,7 +66,8 @@ base::ListValue ItemsToList(const std::vector<Item>& items) {
+     list.Append(base::DictValue()
+                     .Set("id", item.id)
+                     .Set("url", item.url.spec())
+-                    .Set("title", item.title));
++                    .Set("title", item.title)
++                    .Set("custom_title", item.custom_title));
+   }
+   return list;
+ }
+@@ -91,6 +92,9 @@ std::vector<Item> ListToItems(const base::ListValue* list) {
+     if (const std::string* title = dict->FindString("title")) {
+       item.title = base::UTF8ToUTF16(*title);
+     }
++    if (const std::string* name = dict->FindString("custom_title")) {
++      item.custom_title = base::UTF8ToUTF16(*name);
++    }
+     if (!item.id.empty() && item.url.is_valid()) {
+       items.push_back(std::move(item));
+     }
+@@ -314,6 +318,58 @@ const Item* Store::FindItem(const std::string& space_id,
+   return it == items.end() ? nullptr : &*it;
+ }
+ 
++void Store::RenameItem(const std::string& space_id,
++                       ItemKind kind,
++                       const std::string& item_id,
++                       const std::u16string& name) {
++  Space* space = MutableSpace(space_id);
++  if (!space) {
++    return;
++  }
++  std::vector<Item>& items = space->items(kind);
++  if (auto it = std::ranges::find(items, item_id, &Item::id);
++      it != items.end() && it->custom_title != name) {
++    it->custom_title = name;
++    Changed();
++  }
++}
++
++void Store::SetItemUrl(const std::string& space_id,
++                       ItemKind kind,
++                       const std::string& item_id,
++                       const GURL& url) {
++  Space* space = MutableSpace(space_id);
++  if (!space || !url.is_valid()) {
++    return;
++  }
++  std::vector<Item>& items = space->items(kind);
++  if (auto it = std::ranges::find(items, item_id, &Item::id);
++      it != items.end() && it->url != url) {
++    it->url = url;
++    Changed();
++  }
++}
++
++void Store::MoveItem(const std::string& from_space,
++                     const std::string& to_space,
++                     ItemKind kind,
++                     const std::string& item_id) {
++  Space* from = MutableSpace(from_space);
++  Space* to = MutableSpace(to_space);
++  if (!from || !to || from == to) {
++    return;
++  }
++  std::vector<Item>& items = from->items(kind);
++  auto it = std::ranges::find(items, item_id, &Item::id);
++  if (it == items.end()) {
++    return;
++  }
++  Item item = *it;
++  items.erase(it);
++  to->items(kind).push_back(std::move(item));
++  Changed();
++}
++
+ base::CallbackListSubscription Store::AddObserver(
+     base::RepeatingClosure callback) {
+   return observers_.Add(std::move(callback));
+diff --git a/chrome/browser/ui/tabs/saturn_store.h b/chrome/browser/ui/tabs/saturn_store.h
+index 0f6a07c..dea7fca 100644
+--- a/chrome/browser/ui/tabs/saturn_store.h
++++ b/chrome/browser/ui/tabs/saturn_store.h
+@@ -35,6 +35,8 @@ struct Item {
+   std::string id;
+   GURL url;
+   std::u16string title;
++  // Set by "Rename Tab": shown instead of the page's title.
++  std::u16string custom_title;
+ };
+ 
+ struct Space {
+@@ -103,6 +105,20 @@ class Store {
+   const Item* FindItem(const std::string& space_id,
+                        ItemKind kind,
+                        const std::string& item_id) const;
++  // An empty `name` goes back to the page's title.
++  void RenameItem(const std::string& space_id,
++                  ItemKind kind,
++                  const std::string& item_id,
++                  const std::u16string& name);
++  void SetItemUrl(const std::string& space_id,
++                  ItemKind kind,
++                  const std::string& item_id,
++                  const GURL& url);
++  // Moves the item (same id) to the end of `to_space`'s list.
++  void MoveItem(const std::string& from_space,
++                const std::string& to_space,
++                ItemKind kind,
++                const std::string& item_id);
+ 
+   // Runs after every change (and once after loading).
+   base::CallbackListSubscription AddObserver(base::RepeatingClosure callback);
+diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
+index 7d4d542..fd2a906 100644
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -4064,11 +4064,11 @@ void TabStripModel::CloseTabs(base::span<content::WebContents* const> items,
+     return;
+   }
+ 
+-  // Saturn: closing the last tab keeps the window open on an empty page
++  // Saturn: closing the last tab keeps the window open on the start page
+   // (closing the window itself goes through CloseAllTabs()).
+   if (static_cast<int>(filtered_items.size()) == count() && !closing_all_ &&
+       delegate_->IsNormalWindow() && !delegate_->IsForWebApp()) {
+-    delegate_->AddTabAt(GURL(url::kAboutBlankURL), -1, /*foreground=*/true);
++    delegate_->AddTabAt(GURL("chrome://start/"), -1, /*foreground=*/true);
+   }
+ 
+   const bool closing_all = static_cast<int>(filtered_items.size()) == count();
+diff --git a/chrome/browser/ui/views/frame/BUILD.gn b/chrome/browser/ui/views/frame/BUILD.gn
+index 07ff356..cbca7ea 100644
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -537,7 +537,11 @@ source_set("horizontal_tab_strip_region_view") {
+ 
+ source_set("vertical_tab_strip_region_view") {
+   public = [ "vertical_tab_strip_region_view.h" ]
+-  sources = [ "vertical_tab_strip_region_view.cc" ]
++  sources = [
++    "saturn_menu.cc",
++    "saturn_menu.h",
++    "vertical_tab_strip_region_view.cc",
++  ]
+   public_deps = [
+     ":base_tab_strip_region_view",
+     "//base",
+@@ -577,6 +581,8 @@ source_set("vertical_tab_strip_region_view") {
+     "//chrome/browser/ui/views/tabs/common:impl",
+     "//chrome/browser/ui/views/tabs/organizer",
+     "//chrome/browser/ui/web_applications",
++    "//components/url_formatter",
++    "//ui/base/clipboard",
+     "//ui/base/dragdrop:types",
+     "//ui/compositor",
+     "//ui/display",
+diff --git a/chrome/browser/ui/views/frame/contents_web_view.cc b/chrome/browser/ui/views/frame/contents_web_view.cc
+index 1d0ea60..ec78153 100644
+--- a/chrome/browser/ui/views/frame/contents_web_view.cc
++++ b/chrome/browser/ui/views/frame/contents_web_view.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "chrome/browser/ui/views/frame/contents_web_view.h"
+ 
++#include "content/public/common/url_constants.h"
++#include "url/gurl.h"
++
+ #include "base/debug/dump_without_crashing.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -172,6 +175,16 @@ void ContentsWebView::SetWebContents(content::WebContents* web_contents) {
+   SafeInvoke(
+       web_modal::WebContentsModalDialogManager::FromWebContents(web_contents))
+       .Then(&web_modal::WebContentsModalDialogManager::UpdateDialogHost);
++
++  if (GetWidget()) {
++    UpdateBackgroundColor();
++  }
++}
++
++void ContentsWebView::PrimaryPageChanged(content::Page& page) {
++  if (GetWidget()) {
++    UpdateBackgroundColor();
++  }
+ }
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+@@ -201,6 +214,13 @@ void ContentsWebView::DidGetUserInteraction(const blink::WebInputEvent& event) {
+ #endif
+ 
+ void ContentsWebView::UpdateBackgroundColor() {
++  // Saturn: the start page lets the window's acrylic show through.
++  const GURL& page_url = web_contents()
++                             ? web_contents()->GetLastCommittedURL()
++                             : GURL::EmptyGURL();
++  const bool background_visible =
++      background_visible_ && !(page_url.SchemeIs(content::kChromeUIScheme) &&
++                               page_url.host() == "start");
+   const SkColor color = GetColorProvider()->GetColor(
+       is_letterboxing() ? kColorWebContentsBackgroundLetterboxing
+                         : kColorWebContentsBackground);
+@@ -209,19 +229,19 @@ void ContentsWebView::UpdateBackgroundColor() {
+   // TODO(crbug.com/456309057): Update this to be a CHECK.
+   if (SkColorGetA(color) != SK_AlphaOPAQUE) {
+     base::debug::DumpWithoutCrashing();
+-    if (background_visible_) {
++    if (background_visible) {
+       return;
+     }
+   }
+ 
+   auto* background_layer = layer()->AsSolidColor();
+   background_layer->SetColor(
+-      SkColor4f::FromColor(background_visible_ ? color : SK_ColorTRANSPARENT));
++      SkColor4f::FromColor(background_visible ? color : SK_ColorTRANSPARENT));
+ 
+   SafeInvoke(web_contents())
+       .Then(&content::WebContents::GetRenderWidgetHostView)
+       .Then(&content::RenderWidgetHostView::SetBackgroundColor,
+-            background_visible_ ? color : SK_ColorTRANSPARENT);
++            background_visible ? color : SK_ColorTRANSPARENT);
+ }
+ 
+ std::unique_ptr<ui::Layer> ContentsWebView::RecreateLayer() {
+diff --git a/chrome/browser/ui/views/frame/contents_web_view.h b/chrome/browser/ui/views/frame/contents_web_view.h
+index 0dc0d4b..5f20409 100644
+--- a/chrome/browser/ui/views/frame/contents_web_view.h
++++ b/chrome/browser/ui/views/frame/contents_web_view.h
+@@ -64,6 +64,8 @@ class ContentsWebView : public views::WebView,
+   void SetWebContents(content::WebContents* web_contents) override;
+ 
+   // content::WebContentsObserver overrides:
++  // Saturn: the start page (saturn://start) is see-through.
++  void PrimaryPageChanged(content::Page& page) override;
+   // Overridden to track physical interactions (mouse/touch) on the WebContents.
+   // This allows the browser to force focus synchronization in split view even
+   // when native OS focus gets stuck on a different window (like a permission
+diff --git a/chrome/browser/ui/views/frame/saturn_menu.cc b/chrome/browser/ui/views/frame/saturn_menu.cc
+new file mode 100644
+index 0000000..7cf442e
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/saturn_menu.cc
+@@ -0,0 +1,528 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/saturn_menu.h"
++
++#include <algorithm>
++#include <memory>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "base/task/sequenced_task_runner.h"
++#include "build/build_config.h"
++#include "cc/paint/paint_flags.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/display/screen.h"
++#include "ui/events/event.h"
++#include "ui/events/event_observer.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/gfx/text_utils.h"
++#include "ui/views/controls/button/button.h"
++#include "ui/views/event_monitor.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_observer.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include <dwmapi.h>
++
++#include "ui/views/win/hwnd_util.h"
++#endif
++
++namespace saturn {
++
++MenuItem::MenuItem() = default;
++MenuItem::MenuItem(const MenuItem&) = default;
++MenuItem& MenuItem::operator=(const MenuItem&) = default;
++MenuItem::~MenuItem() = default;
++
++// static
++MenuItem MenuItem::Divider() {
++  MenuItem item;
++  item.divider = true;
++  return item;
++}
++
++namespace {
++
++// Figma: the Pinned list menu.
++constexpr int kMenuWidth = 196;
++constexpr int kPadding = 7;
++constexpr int kRowHeight = 30;
++constexpr int kGap = 4;
++constexpr int kIconLeft = 3;
++constexpr int kIconSize = 20;
++constexpr int kTextLeft = 28;
++constexpr int kArrowSize = 24;
++constexpr int kArrowRight = 3;
++constexpr int kTextRightGap = 12;
++constexpr int kDividerWidth = 172;
++constexpr int kMenuRadius = 8;
++constexpr int kRowRadius = 6;
++constexpr int kSubmenuGap = 4;
++constexpr SkColor kMenuFill = SkColorSetARGB(0x99, 0x16, 0x16, 0x16);
++constexpr SkColor kMenuBorder = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
++constexpr SkColor kRowHover = SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF);
++constexpr SkColor kDividerColor = SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF);
++constexpr U8CPU kDisabledAlpha = 0x4D;
++
++int MenuWidthFor(const std::vector<MenuItem>& items) {
++  int width = kMenuWidth;
++  for (const MenuItem& item : items) {
++    if (item.divider) {
++      continue;
++    }
++    const int text = gfx::GetStringWidth(item.label, SidebarFont());
++    const int arrow = item.submenu.empty() ? 0 : kArrowSize + kArrowRight;
++    width = std::max(width,
++                     2 * kPadding + kTextLeft + text + kTextRightGap + arrow);
++  }
++  return width;
++}
++
++int MenuHeightFor(const std::vector<MenuItem>& items) {
++  int height = 2 * kPadding;
++  for (size_t i = 0; i < items.size(); ++i) {
++    height += items[i].divider ? 1 : kRowHeight;
++    if (i) {
++      height += kGap;
++    }
++  }
++  return height;
++}
++
++// Blurs what is behind the menu (acrylic) and rounds its corners. Returns
++// false if the blur is not available; the menu then paints its own fill.
++bool ApplyBackdrop(views::Widget* widget) {
++#if BUILDFLAG(IS_WIN)
++  HWND hwnd = views::HWNDForWidget(widget);
++  if (!hwnd) {
++    return false;
++  }
++  DWORD corner = 2;  // DWMWCP_ROUND
++  DwmSetWindowAttribute(hwnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &corner,
++                        sizeof(corner));
++  // Unlike DWM system backdrops, the accent blur stays on while the window
++  // is inactive (Saturn menus never take activation).
++  struct AccentPolicy {
++    int state;
++    int flags;
++    DWORD gradient_color;  // AABBGGRR
++    int animation_id;
++  };
++  struct CompositionAttributeData {
++    int attribute;
++    void* data;
++    SIZE_T size;
++  };
++  using SetWindowCompositionAttributeFn =
++      BOOL(WINAPI*)(HWND, CompositionAttributeData*);
++  static const auto set_attribute =
++      reinterpret_cast<SetWindowCompositionAttributeFn>(::GetProcAddress(
++          ::GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
++  if (!set_attribute) {
++    return false;
++  }
++  AccentPolicy accent = {
++      4 /* ACCENT_ENABLE_ACRYLICBLURBEHIND */, 0,
++      (static_cast<DWORD>(SkColorGetA(kMenuFill)) << 24) |
++          (static_cast<DWORD>(SkColorGetB(kMenuFill)) << 16) |
++          (static_cast<DWORD>(SkColorGetG(kMenuFill)) << 8) |
++          SkColorGetR(kMenuFill),
++      0};
++  CompositionAttributeData data = {19 /* WCA_ACCENT_POLICY */, &accent,
++                                   sizeof(accent)};
++  return set_attribute(hwnd, &data);
++#else
++  return false;
++#endif
++}
++
++class MenuController;
++
++class MenuRow : public views::Button {
++  METADATA_HEADER(MenuRow, views::Button)
++
++ public:
++  MenuRow(MenuController* controller, int level, size_t index,
++          const MenuItem& item);
++
++  void SetHighlighted(bool highlighted) {
++    if (highlighted_ != highlighted) {
++      highlighted_ = highlighted;
++      SchedulePaint();
++    }
++  }
++
++  // views::Button:
++  void OnMouseEntered(const ui::MouseEvent& event) override;
++
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    const bool hot = GetState() == STATE_HOVERED ||
++                     GetState() == STATE_PRESSED || highlighted_;
++    if (!hot || !GetEnabled()) {
++      return;
++    }
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setColor(kRowHover);
++    canvas->DrawRoundRect(GetLocalBounds(), kRowRadius, flags);
++  }
++
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const U8CPU alpha = GetEnabled() ? 0xFF : kDisabledAlpha;
++    if (item_.icon) {
++      canvas->DrawImageInt(
++          gfx::CreateVectorIcon(*item_.icon, kIconSize,
++                                SkColorSetA(item_.icon_color, alpha)),
++          kIconLeft, (height() - kIconSize) / 2);
++    }
++    int right = width() - kTextRightGap;
++    if (!item_.submenu.empty()) {
++      const int x = width() - kArrowRight - kArrowSize;
++      canvas->DrawImageInt(
++          gfx::CreateVectorIcon(kSaturnMenuDroprightIcon, kArrowSize,
++                                SkColorSetA(SK_ColorWHITE, alpha)),
++          x, (height() - kArrowSize) / 2);
++      right = x;
++    }
++    canvas->DrawStringRectWithFlags(
++        item_.label, SidebarFont(), SkColorSetA(SK_ColorWHITE, alpha),
++        gfx::Rect(kTextLeft, 0, std::max(0, right - kTextLeft), height()),
++        gfx::Canvas::NO_SUBPIXEL_RENDERING);
++  }
++
++ private:
++  raw_ptr<MenuController> controller_;
++  const int level_;
++  const size_t index_;
++  const MenuItem item_;
++  bool highlighted_ = false;
++};
++
++BEGIN_METADATA(MenuRow)
++END_METADATA
++
++class MenuContents : public views::View {
++  METADATA_HEADER(MenuContents, views::View)
++
++ public:
++  MenuContents(MenuController* controller,
++               int level,
++               const std::vector<MenuItem>& items)
++      : items_(items) {
++    for (size_t i = 0; i < items.size(); ++i) {
++      if (items[i].divider) {
++        AddChildView(std::make_unique<views::View>());
++      } else {
++        AddChildView(
++            std::make_unique<MenuRow>(controller, level, i, items[i]));
++      }
++    }
++  }
++
++  void set_paint_fill(bool paint_fill) { paint_fill_ = paint_fill; }
++
++  MenuRow* RowAt(size_t index) {
++    return index < children().size()
++               ? views::AsViewClass<MenuRow>(children()[index])
++               : nullptr;
++  }
++
++  // views::View:
++  void Layout(PassKey) override {
++    int y = kPadding;
++    const int w = width() - 2 * kPadding;
++    for (size_t i = 0; i < children().size(); ++i) {
++      if (i) {
++        y += kGap;
++      }
++      if (items_[i].divider) {
++        children()[i]->SetBounds(kPadding + (w - kDividerWidth) / 2, y,
++                                 kDividerWidth, 1);
++        y += 1;
++      } else {
++        children()[i]->SetBounds(kPadding, y, w, kRowHeight);
++        y += kRowHeight;
++      }
++    }
++  }
++
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    gfx::RectF r(GetLocalBounds());
++    if (paint_fill_) {
++      flags.setColor(kMenuFill);
++      canvas->DrawRoundRect(r, kMenuRadius, flags);
++    }
++    flags.setStyle(cc::PaintFlags::kStroke_Style);
++    flags.setStrokeWidth(1);
++    flags.setColor(kMenuBorder);
++    r.Inset(0.5f);
++    canvas->DrawRoundRect(r, kMenuRadius - 0.5f, flags);
++  }
++
++  void OnPaint(gfx::Canvas* canvas) override {
++    views::View::OnPaint(canvas);
++    cc::PaintFlags flags;
++    flags.setColor(kDividerColor);
++    for (size_t i = 0; i < children().size(); ++i) {
++      if (items_[i].divider) {
++        canvas->DrawRect(gfx::RectF(children()[i]->bounds()), flags);
++      }
++    }
++  }
++
++ private:
++  const std::vector<MenuItem> items_;
++  bool paint_fill_ = true;
++};
++
++BEGIN_METADATA(MenuContents)
++END_METADATA
++
++MenuController* g_current_menu = nullptr;
++
++// Owns the menu's widgets (the menu, and the open submenu). Menus never take
++// activation: the browser window keeps its focus and its acrylic.
++class MenuController : public ui::EventObserver, public views::WidgetObserver {
++ public:
++  MenuController(views::Widget* parent, std::vector<MenuItem> items)
++      : parent_(parent), items_(std::move(items)) {
++    parent_observation_.Observe(parent_.get());
++  }
++  MenuController(const MenuController&) = delete;
++  MenuController& operator=(const MenuController&) = delete;
++  ~MenuController() override = default;
++
++  void Show(const gfx::Point& screen_point) {
++    gfx::Rect bounds(screen_point,
++                     gfx::Size(MenuWidthFor(items_), MenuHeightFor(items_)));
++    const gfx::Rect work =
++        display::Screen::Get()->GetDisplayNearestPoint(screen_point).work_area();
++    bounds.AdjustToFit(work);
++    main_ = CreateMenuWidget(0, items_, bounds, &main_contents_);
++    event_monitor_ = views::EventMonitor::CreateApplicationMonitor(
++        this, parent_->GetNativeWindow(),
++        {ui::EventType::kMousePressed, ui::EventType::kKeyPressed});
++  }
++
++  void Close() {
++    if (closing_) {
++      return;
++    }
++    closing_ = true;
++    event_monitor_.reset();
++    parent_observation_.Reset();
++    if (sub_) {
++      sub_->Hide();
++    }
++    if (main_) {
++      main_->Hide();
++    }
++    if (g_current_menu == this) {
++      g_current_menu = nullptr;
++    }
++    base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(FROM_HERE,
++                                                               this);
++  }
++
++  void OnRowHovered(int level, size_t index) {
++    if (level != 0 || closing_) {
++      return;
++    }
++    if (static_cast<int>(index) == sub_index_) {
++      return;
++    }
++    CloseSubmenu();
++    if (!items_[index].submenu.empty() && items_[index].enabled) {
++      OpenSubmenu(index);
++    }
++  }
++
++  void OnRowPressed(int level, size_t index) {
++    if (closing_) {
++      return;
++    }
++    const MenuItem* item = nullptr;
++    if (level == 0) {
++      item = &items_[index];
++      if (!item->submenu.empty()) {
++        if (sub_index_ != static_cast<int>(index)) {
++          CloseSubmenu();
++          OpenSubmenu(index);
++        }
++        return;
++      }
++    } else if (sub_index_ >= 0) {
++      item = &items_[sub_index_].submenu[index];
++    }
++    if (!item || !item->enabled) {
++      return;
++    }
++    base::RepeatingClosure callback = item->callback;
++    Close();
++    if (callback) {
++      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
++                                                               callback);
++    }
++  }
++
++  // ui::EventObserver:
++  void OnEvent(const ui::Event& event) override {
++    if (closing_) {
++      return;
++    }
++    if (event.IsKeyEvent()) {
++      if (event.AsKeyEvent()->key_code() == ui::VKEY_ESCAPE) {
++        Close();
++      }
++      return;
++    }
++    const gfx::Point cursor =
++        display::Screen::Get()->GetCursorScreenPoint();
++    if ((main_ && main_->GetWindowBoundsInScreen().Contains(cursor)) ||
++        (sub_ && sub_->GetWindowBoundsInScreen().Contains(cursor))) {
++      return;
++    }
++    Close();
++  }
++
++  // views::WidgetObserver (the browser window):
++  void OnWidgetActivationChanged(views::Widget* widget, bool active) override {
++    if (!active) {
++      Close();
++    }
++  }
++  void OnWidgetDestroying(views::Widget* widget) override { Close(); }
++
++ private:
++  std::unique_ptr<views::Widget> CreateMenuWidget(
++      int level,
++      const std::vector<MenuItem>& items,
++      const gfx::Rect& bounds,
++      raw_ptr<MenuContents>* contents_out) {
++    views::Widget::InitParams params(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_POPUP);
++    params.parent = parent_->GetNativeView();
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
++    params.activatable = views::Widget::InitParams::Activatable::kNo;
++    params.z_order = ui::ZOrderLevel::kFloatingUIElement;
++    params.bounds = bounds;
++    params.name = "SaturnMenu";
++    auto widget = std::make_unique<views::Widget>();
++    widget->Init(std::move(params));
++    auto contents = std::make_unique<MenuContents>(this, level, items);
++    *contents_out = contents.get();
++    widget->SetContentsView(std::move(contents));
++    (*contents_out)->set_paint_fill(!ApplyBackdrop(widget.get()));
++    widget->ShowInactive();
++    return widget;
++  }
++
++  void OpenSubmenu(size_t index) {
++    MenuRow* const row = main_contents_ ? main_contents_->RowAt(index) : nullptr;
++    if (!row) {
++      return;
++    }
++    const std::vector<MenuItem>& items = items_[index].submenu;
++    const gfx::Rect main_bounds = main_->GetWindowBoundsInScreen();
++    const gfx::Rect row_bounds = row->GetBoundsInScreen();
++    gfx::Rect bounds(main_bounds.right() + kSubmenuGap,
++                     row_bounds.y() - kPadding, MenuWidthFor(items),
++                     MenuHeightFor(items));
++    const gfx::Rect work = display::Screen::Get()
++                               ->GetDisplayNearestPoint(row_bounds.origin())
++                               .work_area();
++    if (bounds.right() > work.right()) {
++      bounds.set_x(main_bounds.x() - kSubmenuGap - bounds.width());
++    }
++    bounds.AdjustToFit(work);
++    sub_index_ = static_cast<int>(index);
++    row->SetHighlighted(true);
++    sub_ = CreateMenuWidget(1, items, bounds, &sub_contents_);
++  }
++
++  void CloseSubmenu() {
++    if (sub_index_ >= 0 && main_contents_) {
++      if (MenuRow* row = main_contents_->RowAt(sub_index_)) {
++        row->SetHighlighted(false);
++      }
++    }
++    sub_index_ = -1;
++    sub_contents_ = nullptr;
++    if (sub_) {
++      // Not from inside one of its own event handlers: hide now, delete later.
++      sub_->Hide();
++      base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(
++          FROM_HERE, std::move(sub_));
++    }
++  }
++
++  raw_ptr<views::Widget> parent_;
++  const std::vector<MenuItem> items_;
++  std::unique_ptr<views::Widget> main_;
++  raw_ptr<MenuContents> main_contents_ = nullptr;
++  std::unique_ptr<views::Widget> sub_;
++  raw_ptr<MenuContents> sub_contents_ = nullptr;
++  int sub_index_ = -1;
++  bool closing_ = false;
++  std::unique_ptr<views::EventMonitor> event_monitor_;
++  base::ScopedObservation<views::Widget, views::WidgetObserver>
++      parent_observation_{this};
++};
++
++MenuRow::MenuRow(MenuController* controller,
++                 int level,
++                 size_t index,
++                 const MenuItem& item)
++    : views::Button(base::BindRepeating(&MenuController::OnRowPressed,
++                                        base::Unretained(controller), level,
++                                        index)),
++      controller_(controller),
++      level_(level),
++      index_(index),
++      item_(item) {
++  SetEnabled(item.enabled);
++  SetInstallFocusRingOnFocus(false);
++  GetViewAccessibility().SetName(item.label);
++}
++
++void MenuRow::OnMouseEntered(const ui::MouseEvent& event) {
++  views::Button::OnMouseEntered(event);
++  controller_->OnRowHovered(level_, index_);
++}
++
++}  // namespace
++
++void ShowMenu(views::Widget* parent,
++              const gfx::Point& screen_point,
++              std::vector<MenuItem> items) {
++  if (g_current_menu) {
++    g_current_menu->Close();
++  }
++  if (!parent || items.empty()) {
++    return;
++  }
++  g_current_menu = new MenuController(parent, std::move(items));
++  g_current_menu->Show(screen_point);
++}
++
++}  // namespace saturn
+diff --git a/chrome/browser/ui/views/frame/saturn_menu.h b/chrome/browser/ui/views/frame/saturn_menu.h
+new file mode 100644
+index 0000000..16925fc
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/saturn_menu.h
+@@ -0,0 +1,56 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_MENU_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_MENU_H_
++
++#include <string>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "third_party/skia/include/core/SkColor.h"
++
++namespace gfx {
++class Point;
++struct VectorIcon;
++}  // namespace gfx
++
++namespace views {
++class Widget;
++}
++
++namespace saturn {
++
++// One row of a Saturn menu (Figma: the Pinned list menu). Rows without an
++// icon keep the text where it would be with one.
++struct MenuItem {
++  MenuItem();
++  MenuItem(const MenuItem&);
++  MenuItem& operator=(const MenuItem&);
++  ~MenuItem();
++
++  static MenuItem Divider();
++
++  bool divider = false;
++  raw_ptr<const gfx::VectorIcon> icon = nullptr;
++  SkColor icon_color = SK_ColorWHITE;
++  std::u16string label;
++  // Disabled rows are drawn at 30% and do nothing.
++  bool enabled = true;
++  // Runs after the menu has closed.
++  base::RepeatingClosure callback;
++  // Non-empty: the row opens this menu to its right (and has no callback).
++  std::vector<MenuItem> submenu;
++};
++
++// Shows a Saturn-style menu (blurred, 60% #161616, 196px wide) with its top
++// left corner at `screen_point`, over `parent`. Replaces any open Saturn menu.
++void ShowMenu(views::Widget* parent,
++              const gfx::Point& screen_point,
++              std::vector<MenuItem> items);
++
++}  // namespace saturn
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_MENU_H_
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index f897d41..2d7c2d5 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -44,7 +44,12 @@
+ #include "chrome/browser/ui/views/frame/custom_corners_background.h"
+ #include "chrome/browser/ui/views/frame/frame_separator.h"
+ #include "chrome/browser/ui/views/frame/safe_invoke/safe_invoke.h"
++#include "chrome/browser/ui/views/frame/saturn_menu.h"
++#include "components/url_formatter/url_fixer.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++#include "chrome/browser/ui/tabs/tab_muted_utils.h"
++#include "ui/base/clipboard/scoped_clipboard_writer.h"
+ #include "chrome/browser/ui/views/frame/shadow_frame_view.h"
+ #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+@@ -143,6 +148,10 @@
+ namespace {
+ constexpr int kResizeAreaWidth = 5;
+ 
++GURL SaturnFixupUrl(const std::u16string& text) {
++  return url_formatter::FixupURL(base::UTF16ToUTF8(text), std::string());
++}
++
+ // Saturn: closes today's tabs (tabs of favorites and Pinned list items stay
+ // open). Closing the last tab leaves a blank page (see TabStripModel).
+ void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
+@@ -271,7 +280,9 @@ class SaturnItemView : public views::Button,
+     icon_ = icon;
+ 
+     const std::u16string title =
+-        tab && !tab->GetTitle().empty() ? tab->GetTitle() : item->title;
++        !item->custom_title.empty() ? item->custom_title
++        : tab && !tab->GetTitle().empty() ? tab->GetTitle()
++                                          : item->title;
+     if (title_) {
+       title_->SetText(title);
+     }
+@@ -338,6 +349,10 @@ class SaturnItemView : public views::Button,
+                                   const gfx::Point& point,
+                                   ui::mojom::MenuSourceType source_type)
+       override {
++    if (kind_ == saturn::ItemKind::kPinned) {
++      ShowPinnedMenu(point);
++      return;
++    }
+     menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+     if (open_) {
+       menu_model_->AddItem(kCloseCommand, u"Close tab");
+@@ -395,6 +410,196 @@ class SaturnItemView : public views::Button,
+ 
+   void Open() { saturn::OpenItem(browser_, space_id_, kind_, item_id_); }
+ 
++  // Figma: the Pinned list menu.
++  void ShowPinnedMenu(const gfx::Point& point) {
++    const saturn::Item* item =
++        saturn::Store::Get().FindItem(space_id_, kind_, item_id_);
++    if (!item) {
++      return;
++    }
++    content::WebContents* const tab = saturn::FindItemTab(browser_, item_id_);
++    const base::WeakPtr<BrowserWindowInterface> browser =
++        browser_->GetWeakPtr();
++    const std::string space = space_id_;
++    const saturn::ItemKind kind = kind_;
++    const std::string id = item_id_;
++    // Runs `fn(browser, item, open tab or null)` if all still exist.
++    using Action = void (*)(BrowserWindowInterface*, const std::string& space,
++                            const saturn::Item&, content::WebContents*);
++    auto bind = [&](Action fn) {
++      return base::BindRepeating(
++          [](base::WeakPtr<BrowserWindowInterface> browser, std::string space,
++             saturn::ItemKind kind, std::string id, Action fn) {
++            const saturn::Item* item =
++                saturn::Store::Get().FindItem(space, kind, id);
++            if (!browser || !item) {
++              return;
++            }
++            fn(browser.get(), space, *item,
++               saturn::FindItemTab(browser.get(), id));
++          },
++          browser, space, kind, id, fn);
++    };
++    auto row = [](const gfx::VectorIcon& icon, std::u16string label,
++                  base::RepeatingClosure callback, bool enabled = true) {
++      saturn::MenuItem entry;
++      entry.icon = &icon;
++      entry.label = std::move(label);
++      entry.callback = std::move(callback);
++      entry.enabled = enabled;
++      return entry;
++    };
++
++    std::vector<saturn::MenuItem> items;
++    items.push_back(row(
++        kSaturnMenuCopyLinkIcon, u"Copy Link",
++        bind([](BrowserWindowInterface*, const std::string&,
++                const saturn::Item& item, content::WebContents* tab) {
++          const GURL url = tab ? tab->GetLastCommittedURL() : item.url;
++          ui::ScopedClipboardWriter(ui::ClipboardBuffer::kCopyPaste)
++              .WriteText(base::UTF8ToUTF16(url.spec()));
++        })));
++    items.push_back(row(
++        kSaturnMenuRenameTabIcon, u"Rename Tab",
++        bind([](BrowserWindowInterface* browser, const std::string& space,
++                const saturn::Item& item, content::WebContents* tab) {
++          const std::u16string current =
++              !item.custom_title.empty() ? item.custom_title
++              : tab && !tab->GetTitle().empty() ? tab->GetTitle()
++                                                : item.title;
++          ShowSaturnTextPrompt(
++              BrowserView::GetBrowserViewForBrowser(browser), u"Tab name",
++              current,
++              base::BindOnce(
++                  [](std::string space, std::string id,
++                     const std::u16string& name) {
++                    saturn::Store::Get().RenameItem(
++                        space, saturn::ItemKind::kPinned, id, name);
++                  },
++                  space, item.id));
++        })));
++    const bool muted = tab && tab->IsAudioMuted();
++    items.push_back(row(
++        muted ? kSaturnMenuUnmuteTabIcon : kSaturnMenuMuteTabIcon,
++        muted ? u"Unmute" : u"Mute",
++        bind([](BrowserWindowInterface*, const std::string&,
++                const saturn::Item&, content::WebContents* tab) {
++          if (tab) {
++            SetTabAudioMuted(tab, !tab->IsAudioMuted(),
++                             TabMutedReason::kAudioIndicator, std::string());
++          }
++        }),
++        /*enabled=*/tab && (muted || tab->IsCurrentlyAudible())));
++
++    saturn::MenuItem edit;
++    edit.icon = &kSaturnMenuEditPinnedPageIcon;
++    edit.label = u"Edit Pinned page";
++    edit.submenu.push_back(row(
++        kSaturnMenuUpdateUrlIcon, u"Update pinned URL with current one",
++        bind([](BrowserWindowInterface*, const std::string& space,
++                const saturn::Item& item, content::WebContents* tab) {
++          if (tab) {
++            saturn::Store::Get().SetItemUrl(space, saturn::ItemKind::kPinned,
++                                            item.id,
++                                            tab->GetLastCommittedURL());
++          }
++        }),
++        /*enabled=*/tab && tab->GetLastCommittedURL().is_valid() &&
++            tab->GetLastCommittedURL() != item->url));
++    edit.submenu.push_back(row(
++        kSaturnMenuEditUrlIcon, u"Edit URL",
++        bind([](BrowserWindowInterface* browser, const std::string& space,
++                const saturn::Item& item, content::WebContents* tab) {
++          ShowSaturnTextPrompt(
++              BrowserView::GetBrowserViewForBrowser(browser), u"Pinned URL",
++              base::UTF8ToUTF16(item.url.spec()),
++              base::BindOnce(
++                  [](base::WeakPtr<BrowserWindowInterface> browser,
++                     std::string space, std::string id,
++                     const std::u16string& text) {
++                    const GURL url = SaturnFixupUrl(text);
++                    if (!url.is_valid()) {
++                      return;
++                    }
++                    saturn::Store::Get().SetItemUrl(
++                        space, saturn::ItemKind::kPinned, id, url);
++                    // An open tab goes to the new address.
++                    if (content::WebContents* tab =
++                            browser ? saturn::FindItemTab(browser.get(), id)
++                                    : nullptr) {
++                      tab->GetController().LoadURL(
++                          url, content::Referrer(),
++                          ui::PAGE_TRANSITION_TYPED, std::string());
++                    }
++                  },
++                  browser->GetWeakPtr(), space, item.id));
++        })));
++    items.push_back(std::move(edit));
++    items.push_back(saturn::MenuItem::Divider());
++
++    items.push_back(row(
++        kSaturnMenuDuplicateIcon, u"Duplicate",
++        bind([](BrowserWindowInterface* browser, const std::string&,
++                const saturn::Item& item, content::WebContents* tab) {
++          // An ordinary tab (listed with today's tabs).
++          chrome::AddAndReturnTabAt(
++              browser, tab ? tab->GetLastCommittedURL() : item.url, -1,
++              /*foreground=*/true);
++        })));
++
++    saturn::MenuItem move;
++    move.icon = &kSaturnMenuEditPinnedPageIcon;
++    move.label = u"Move to";
++    for (const saturn::Space& other : saturn::Store::Get().spaces()) {
++      if (other.id == space_id_) {
++        continue;
++      }
++      saturn::MenuItem entry;
++      entry.label = other.name;
++      entry.callback = base::BindRepeating(
++          [](base::WeakPtr<BrowserWindowInterface> browser, std::string from,
++             std::string to, std::string id) {
++            saturn::Store& store = saturn::Store::Get();
++            const saturn::Space* from_space = store.FindSpace(from);
++            const saturn::Space* to_space = store.FindSpace(to);
++            if (!from_space || !to_space) {
++              return;
++            }
++            const bool same_cookies =
++                from_space->partition == to_space->partition &&
++                from_space->profile == to_space->profile;
++            content::WebContents* const tab =
++                browser ? saturn::FindItemTab(browser.get(), id) : nullptr;
++            store.MoveItem(from, to, saturn::ItemKind::kPinned, id);
++            if (!tab) {
++              return;
++            }
++            if (same_cookies) {
++              // Keeps running, listed under the other space.
++              saturn::SetTabTag(tab, to, saturn::ItemKind::kPinned, id);
++            } else {
++              TabStripModel* const model = browser->GetTabStripModel();
++              model->CloseWebContentsAt(model->GetIndexOfWebContents(tab),
++                                        TabCloseTypes::CLOSE_USER_GESTURE);
++            }
++          },
++          browser, space, other.id, id);
++      move.submenu.push_back(std::move(entry));
++    }
++    move.enabled = !move.submenu.empty();
++    items.push_back(std::move(move));
++    items.push_back(saturn::MenuItem::Divider());
++
++    saturn::MenuItem remove = row(
++        kSaturnMenuDeletePinnedTabIcon, u"Remove Pin",
++        base::BindRepeating(&SaturnItemView::Remove, browser, space, kind,
++                            id));
++    remove.icon_color = SkColorSetRGB(0xFF, 0x3A, 0x3A);
++    items.push_back(std::move(remove));
++
++    saturn::ShowMenu(GetWidget(), point, std::move(items));
++  }
++
+   // Close the open tab, or remove the (closed) item.
+   void OnActionPressed() {
+     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+@@ -512,13 +717,18 @@ class SaturnItemsView : public views::View {
+     }
+   }
+ 
+-  // Shows an outlined, empty slot where a dropped tab would go.
+-  void SetDropHint(bool show) {
+-    if (drop_hint_ == show) {
++  // Shows an outlined, empty slot where a dropped tab would go; brighter
++  // while the dragged tab is over it.
++  void SetDropHint(bool show, bool active = true) {
++    if (drop_hint_ == show && drop_hint_active_ == active) {
+       return;
+     }
++    const bool resize = drop_hint_ != show;
+     drop_hint_ = show;
+-    PreferredSizeChanged();
++    drop_hint_active_ = active;
++    if (resize) {
++      PreferredSizeChanged();
++    }
+     SchedulePaint();
+   }
+ 
+@@ -554,7 +764,8 @@ class SaturnItemsView : public views::View {
+     flags.setAntiAlias(true);
+     flags.setStyle(cc::PaintFlags::kStroke_Style);
+     flags.setStrokeWidth(1.5f);
+-    flags.setColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
++    flags.setColor(
++        SkColorSetARGB(drop_hint_active_ ? 0x4D : 0x26, 0xFF, 0xFF, 0xFF));
+     gfx::RectF r(SlotBounds(children().size()));
+     r.Inset(0.75f);
+     canvas->DrawRoundRect(r, saturn::kSidebarTileRadius, flags);
+@@ -584,6 +795,7 @@ class SaturnItemsView : public views::View {
+   const saturn::ItemKind kind_;
+   std::string space_id_;
+   bool drop_hint_ = false;
++  bool drop_hint_active_ = true;
+ };
+ 
+ BEGIN_METADATA(SaturnItemsView)
+@@ -965,10 +1177,18 @@ class SaturnTodayHeader : public views::View,
+   }
+ 
+   void SetDropHint(int zone) {
+-    favorites_->SetDropHint(zone == 1);
++    drop_zone_ = zone;
++    favorites_->SetDropHint(zone == 1 || dragging_, zone == 1);
+     pinned_list_->SetDropHint(zone == 2);
+   }
+ 
++  // While a tab is dragged the favorites show their empty slot right away
++  // (an easy target), not only once the tab is over them.
++  void SetDragging(bool dragging) {
++    dragging_ = dragging;
++    SetDropHint(drop_zone_);
++  }
++
+   const std::string& space_id() const { return space_id_; }
+ 
+   void Layout(PassKey) override {
+@@ -1127,6 +1347,8 @@ class SaturnTodayHeader : public views::View,
+   raw_ptr<BrowserWindowInterface> browser_;
+   std::string space_id_;
+   raw_ptr<SaturnItemsView> favorites_ = nullptr;
++  int drop_zone_ = 0;
++  bool dragging_ = false;
+   raw_ptr<SaturnItemsView> pinned_list_ = nullptr;
+   raw_ptr<views::View> divider_ = nullptr;
+   raw_ptr<views::LabelButton> clear_ = nullptr;
+@@ -2042,12 +2264,26 @@ void VerticalTabStripRegionView::SaturnSetDropZone(int zone) {
+   }
+ }
+ 
++void VerticalTabStripRegionView::SaturnSetDragging(bool dragging) {
++  saturn_dragging_ = dragging;
++  if (TabStripView* const strip = tab_strip_view()) {
++    if (auto* const header = views::AsViewClass<SaturnTodayHeader>(
++            strip->saturn_today_header())) {
++      header->SetDragging(dragging);
++    }
++  }
++}
++
+ void VerticalTabStripRegionView::SaturnOnTabDragMoved(
+     const gfx::Point& point_in_screen) {
+   if (TabDragHandler* const handler = saturn_drag_handler()) {
+     handler->SetSaturnDragStoppedCallback(
+         base::BindRepeating(&VerticalTabStripRegionView::SaturnOnTabDragStopped,
+                             base::Unretained(this)));
++    if (!saturn_dragging_ && !handler->IsDraggingPinnedTabs() &&
++        !handler->IsDraggingGroups()) {
++      SaturnSetDragging(true);
++    }
+   }
+   SaturnSetDropZone(SaturnDropZoneAt(point_in_screen));
+ }
+@@ -2061,6 +2297,7 @@ void VerticalTabStripRegionView::SaturnOnTabDragStopped() {
+     zone = saturn_drop_zone_;
+   }
+   SaturnSetDropZone(0);
++  SaturnSetDragging(false);
+   tabs::TabInterface* const tab =
+       zone ? tab_strip_model()->GetActiveTab() : nullptr;
+   TabStripView* const strip = tab_strip_view();
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index db3cb99..77eb583 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -298,8 +298,11 @@ class VerticalTabStripRegionView final
+   // 2 = Pinned list, 0 = none.
+   int SaturnDropZoneAt(const gfx::Point& point_in_screen) const;
+   void SaturnSetDropZone(int zone);
++  void SaturnSetDragging(bool dragging);
+   void SaturnOnTabDragStopped();
+   int saturn_drop_zone_ = 0;
++  // A tab drag that can end in favorites / the Pinned list is going on.
++  bool saturn_dragging_ = false;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_
+diff --git a/chrome/browser/ui/views/toolbar/BUILD.gn b/chrome/browser/ui/views/toolbar/BUILD.gn
+index 97ecee5..d67b1f2 100644
+--- a/chrome/browser/ui/views/toolbar/BUILD.gn
++++ b/chrome/browser/ui/views/toolbar/BUILD.gn
+@@ -203,6 +203,9 @@ source_set("impl") {
+     "toolbar_ink_drop_util.cc",
+     "saturn_url_pill.cc",
+     "saturn_url_pill.h",
++    "//chrome/browser/ui/webui/saturn_start/saturn_start_page.h",
++    "//chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc",
++    "//chrome/browser/ui/webui/saturn_start/saturn_start_ui.h",
+     "toolbar_view.cc",
+     "webui_app_menu_control.cc",
+     "webui_avatar_toolbar_button.cc",
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.cc b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+index b426dbb..dc65544 100644
+--- a/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+@@ -161,14 +161,20 @@ class SaturnUrlPopup : public views::WidgetObserver,
+   SaturnUrlPopup& operator=(const SaturnUrlPopup&) = delete;
+   ~SaturnUrlPopup() override = default;
+ 
+-  void Show(const std::u16string& text, bool new_tab) {
++  void Show(const std::u16string& text,
++            bool new_tab,
++            const std::u16string& placeholder = u"Search or enter URL",
++            SaturnTextPromptCallback callback = {}) {
+     new_tab_ = new_tab;
++    callback_ = std::move(callback);
+     if (!widget_) {
+       Create();
+     }
+     if (!textfield_) {
+       return;
+     }
++    textfield_->SetPlaceholderText(placeholder);
++    textfield_->GetViewAccessibility().SetName(placeholder);
+ 
+     views::View* const page = browser_view_->contents_container();
+     gfx::Rect area = page && page->GetVisible() && !page->bounds().IsEmpty()
+@@ -190,6 +196,7 @@ class SaturnUrlPopup : public views::WidgetObserver,
+     if (widget_ && widget_->IsVisible()) {
+       widget_->Hide();
+     }
++    callback_.Reset();
+   }
+ 
+   // views::WidgetObserver:
+@@ -251,7 +258,12 @@ class SaturnUrlPopup : public views::WidgetObserver,
+   void Submit() {
+     std::u16string text;
+     base::TrimWhitespace(textfield_->GetText(), base::TRIM_ALL, &text);
++    SaturnTextPromptCallback callback = std::move(callback_);
+     Hide();
++    if (callback) {
++      std::move(callback).Run(text);
++      return;
++    }
+     if (text.empty()) {
+       return;
+     }
+@@ -277,6 +289,7 @@ class SaturnUrlPopup : public views::WidgetObserver,
+   std::unique_ptr<views::Widget> widget_;
+   raw_ptr<views::Textfield> textfield_ = nullptr;
+   bool new_tab_ = false;
++  SaturnTextPromptCallback callback_;
+   base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
+       this};
+ };
+@@ -302,6 +315,22 @@ void ShowSaturnUrlPopup(BrowserView* browser_view,
+   popup->Show(text, new_tab);
+ }
+ 
++void ShowSaturnTextPrompt(BrowserView* browser_view,
++                          const std::u16string& placeholder,
++                          const std::u16string& text,
++                          SaturnTextPromptCallback callback) {
++  if (!browser_view || !browser_view->GetWidget()) {
++    return;
++  }
++  SaturnUrlPopup* popup = browser_view->GetProperty(kSaturnUrlPopupKey);
++  if (!popup) {
++    browser_view->SetProperty(kSaturnUrlPopupKey,
++                              std::make_unique<SaturnUrlPopup>(browser_view));
++    popup = browser_view->GetProperty(kSaturnUrlPopupKey);
++  }
++  popup->Show(text, /*new_tab=*/false, placeholder, std::move(callback));
++}
++
+ SaturnUrlPill::SaturnUrlPill(BrowserView* browser_view)
+     : browser_view_(browser_view) {
+   // Lighter while hovered (also over the copy button).
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.h b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+index fc089d5..659c7c9 100644
+--- a/chrome/browser/ui/views/toolbar/saturn_url_pill.h
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+@@ -56,6 +56,15 @@ void ShowSaturnUrlPopup(BrowserView* browser_view,
+                         const std::u16string& text,
+                         bool new_tab);
+ 
++// Saturn: the same popup as a text prompt (Rename Tab, Edit URL). Enter runs
++// `callback` with the trimmed text; Escape or clicking elsewhere does not.
++using SaturnTextPromptCallback =
++    base::OnceCallback<void(const std::u16string& text)>;
++void ShowSaturnTextPrompt(BrowserView* browser_view,
++                          const std::u16string& placeholder,
++                          const std::u16string& text,
++                          SaturnTextPromptCallback callback);
++
+ // Saturn: the "New space" popup. `callback` gets the name and whether the
+ // space gets its own cookies; it does not run if the popup is cancelled.
+ using SaturnNewSpaceCallback =
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 9baf1c8..58a4694 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/webui/chrome_web_ui_configs.h"
+ 
++#include "chrome/browser/ui/webui/saturn_start/saturn_start_ui.h"
++
+ #include "build/android_buildflags.h"
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
+@@ -271,6 +273,8 @@ void RegisterChromeWebUIConfigs() {
+ 
+   auto& map = content::WebUIConfigMap::GetInstance();
+   map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
++  // Saturn: the start page (saturn://start).
++  map.AddWebUIConfig(std::make_unique<SaturnStartUIConfig>());
+   map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
+   map.AddWebUIConfig(
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/_ink.txt b/chrome/browser/ui/webui/saturn_start/resources/_ink.txt
+new file mode 100644
+index 0000000..c0e7708
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/_ink.txt
+@@ -0,0 +1,31 @@
++// The silhouette of src/pieces/planetscale.ts: 0 is the logo, a space is not.
++const INK = String.raw `
++
++                  00000000000000000000
++              0000000000000000000000000000
++           0000000000000000000000000000000000
++         00000000000000000000000000000000000000
++       000000000000000000000000000000000000000000
++      00000000000000000000000000000000000000000000
++     0000000000000000000000000000000000000000000000
++    000000000000000000000000000000000000000000000000
++   000000000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000000000
++  000000000000000000000000000000000000000000000
++  0000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000
++  00000000000000000000000000    000000000           00
++  000000000000000000000000    000000000           0000
++  0000000000000000000000    000000000           000000
++  00000000000000000000    000000000           00000000
++   00000000000000000    000000000           000000000
++    00000000000000    000000000           0000000000
++     00000000000    000000000           00000000000
++      00000000    000000000           000000000000
++       00000    000000000           0000000000000
++         0    000000000           0000000000000
++             00000000           0000000000000
++              00000           000000000000
++                            0000000000
++
++`;
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/search.svg b/chrome/browser/ui/webui/saturn_start/resources/search.svg
+new file mode 100644
+index 0000000..03d9340
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/search.svg
+@@ -0,0 +1,11 @@
++<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
++<g clip-path="url(#clip0_4125_371)">
++<path d="M2.5 8.33333C2.5 9.09938 2.65088 9.85792 2.94404 10.5657C3.23719 11.2734 3.66687 11.9164 4.20854 12.4581C4.75022 12.9998 5.39328 13.4295 6.10101 13.7226C6.80875 14.0158 7.56729 14.1667 8.33333 14.1667C9.09938 14.1667 9.85792 14.0158 10.5657 13.7226C11.2734 13.4295 11.9164 12.9998 12.4581 12.4581C12.9998 11.9164 13.4295 11.2734 13.7226 10.5657C14.0158 9.85792 14.1667 9.09938 14.1667 8.33333C14.1667 7.56729 14.0158 6.80875 13.7226 6.10101C13.4295 5.39328 12.9998 4.75022 12.4581 4.20854C11.9164 3.66687 11.2734 3.23719 10.5657 2.94404C9.85792 2.65088 9.09938 2.5 8.33333 2.5C7.56729 2.5 6.80875 2.65088 6.10101 2.94404C5.39328 3.23719 4.75022 3.66687 4.20854 4.20854C3.66687 4.75022 3.23719 5.39328 2.94404 6.10101C2.65088 6.80875 2.5 7.56729 2.5 8.33333Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="white"/>
++<path d="M17.5 17.5L12.5 12.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="white"/>
++</g>
++<defs>
++<clipPath id="clip0_4125_371">
++<rect width="20" height="20" fill="white"/>
++</clipPath>
++</defs>
++</svg>
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/start.css b/chrome/browser/ui/webui/saturn_start/resources/start.css
+new file mode 100644
+index 0000000..f46062d
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/start.css
+@@ -0,0 +1,84 @@
++@font-face {
++  font-family: Inter;
++  src: url(Inter-Regular.ttf);
++  font-weight: 400;
++}
++@font-face {
++  font-family: Inter;
++  src: url(Inter-Medium.ttf);
++  font-weight: 500;
++}
++
++html,
++body {
++  margin: 0;
++  height: 100%;
++  overflow: hidden;
++  /* See-through: the window's acrylic shows behind this. */
++  background: rgba(0, 0, 0, 0.5);
++  color: #fff;
++  font-family: Inter, "Segoe UI", sans-serif;
++  -webkit-font-smoothing: antialiased;
++}
++
++#art {
++  position: fixed;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++}
++
++main {
++  position: relative;
++  height: 100%;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  gap: 20px;
++}
++
++#summary {
++  text-align: center;
++  user-select: none;
++}
++#time {
++  font-size: 40px;
++  font-weight: 500;
++  letter-spacing: -0.02em;
++}
++#date {
++  margin-top: 4px;
++  font-size: 14px;
++  color: rgba(255, 255, 255, 0.6);
++}
++
++#search {
++  position: relative;
++  width: clamp(300px, 40vw, 800px);
++  height: 38px;
++  margin: 0;
++}
++#q {
++  box-sizing: border-box;
++  width: 100%;
++  height: 100%;
++  margin: 0;
++  padding: 0 40px 0 12px;
++  border: 0;
++  border-radius: 10px;
++  outline: none;
++  background: rgba(255, 255, 255, 0.15);
++  color: #fff;
++  font: 14px Inter, "Segoe UI", sans-serif;
++  caret-color: #fff;
++}
++#q::placeholder {
++  color: rgba(255, 255, 255, 0.6);
++}
++#search img {
++  position: absolute;
++  right: 9px;
++  top: 9px;
++  pointer-events: none;
++}
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/start.html b/chrome/browser/ui/webui/saturn_start/resources/start.html
+new file mode 100644
+index 0000000..ac7b389
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/start.html
+@@ -0,0 +1,23 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>Start</title>
++<link rel="stylesheet" href="start.css">
++</head>
++<body>
++<canvas id="art" aria-hidden="true"></canvas>
++<main>
++  <section id="summary" aria-live="polite">
++    <div id="time"></div>
++    <div id="date"></div>
++  </section>
++  <form id="search" role="search">
++    <input id="q" type="text" autocomplete="off" spellcheck="false"
++           placeholder="Search anything" aria-label="Search anything" autofocus>
++    <img src="search.svg" alt="" width="20" height="20">
++  </form>
++</main>
++<script type="module" src="start.js"></script>
++</body>
++</html>
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/start.js b/chrome/browser/ui/webui/saturn_start/resources/start.js
+new file mode 100644
+index 0000000..9b82620
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/start.js
+@@ -0,0 +1,390 @@
++// The silhouette of src/pieces/planetscale.ts: 0 is the logo, a space is not.
++const INK = String.raw `
++
++                  00000000000000000000
++              0000000000000000000000000000
++           0000000000000000000000000000000000
++         00000000000000000000000000000000000000
++       000000000000000000000000000000000000000000
++      00000000000000000000000000000000000000000000
++     0000000000000000000000000000000000000000000000
++    000000000000000000000000000000000000000000000000
++   000000000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000000000
++  000000000000000000000000000000000000000000000
++  0000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000
++  00000000000000000000000000    000000000           00
++  000000000000000000000000    000000000           0000
++  0000000000000000000000    000000000           000000
++  00000000000000000000    000000000           00000000
++   00000000000000000    000000000           000000000
++    00000000000000    000000000           0000000000
++     00000000000    000000000           00000000000
++      00000000    000000000           000000000000
++       00000    000000000           0000000000000
++         0    000000000           0000000000000
++             00000000           0000000000000
++              00000           000000000000
++                            0000000000
++
++`;
++
++// Saturn start page: a dot-art planet behind the search box. The art is
++// "planet scale" (a dark planet cut into a mark, backlit, a moon circling),
++// reworked so the grid covers the whole page: the planet keeps its size in
++// cells and the procedural star field simply extends to the edges.
++
++const CELL = 5; // css px per cell (smaller than the original's)
++const FPS = 15;
++const R = 41; // the planet, in cells
++const SUN = [-0.68, -0.68, 0.2]; // toward the sun: upper left, a little toward us
++const MOON_R = 7;
++const ORBIT = 16; // seconds for the moon to go round
++const COVER = [0, 0.3, 0.6, 1]; // how much each dot fills, against the largest
++const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => v / 16 - 0.47);
++const PALETTE = [
++  '#101010', '#181818', '#202020', '#282828', '#303030', '#3a3a3a', '#444444', '#4e4e4e',
++  '#585858', '#636363', '#6e6e6e', '#797979', '#858585', '#919191', '#9d9d9d', '#a9a9a9',
++  '#b5b5b5', '#c1c1c1', '#cccccc', '#d7d7d7', '#e1e1e1', '#eaeaea', '#f3f3f3', '#ffffff',
++];
++
++function hash(x, y) {
++  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
++  h = Math.imul(h ^ (h >>> 13), 1274126177);
++  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
++}
++// Value noise, wrapping every `period` lattice cells in x when period > 0.
++function noise(x, y, period) {
++  const xi = Math.floor(x), yi = Math.floor(y);
++  const fx = x - xi, fy = y - yi;
++  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
++  let x0 = xi, x1 = xi + 1;
++  if (period) {
++    x0 = ((xi % period) + period) % period;
++    x1 = (x0 + 1) % period;
++  }
++  const a = hash(x0, yi), b = hash(x1, yi), c = hash(x0, yi + 1), d = hash(x1, yi + 1);
++  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
++}
++function fbm(x, y, octaves, period) {
++  let s = 0, n = 0, amp = 0.5, f = 1;
++  for (let i = 0; i < octaves; i++) {
++    s += amp * noise(x * f, y * f, period * f);
++    n += amp;
++    amp *= 0.5;
++    f *= 2;
++  }
++  return s / n;
++}
++const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
++const smooth = (a, b, v) => {
++  const k = clamp((v - a) / (b - a));
++  return k * k * (3 - 2 * k);
++};
++const hex = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
++
++// A 3x3 box blur, `passes` times over, in place.
++function blur(a, W, H, passes) {
++  const b = new Float32Array(a.length);
++  for (let p = 0; p < passes; p++) {
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += a[r * W + Math.min(W - 1, Math.max(0, x + i))];
++        b[r * W + x] = s / 3;
++      }
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += b[Math.min(H - 1, Math.max(0, r + i)) * W + x];
++        a[r * W + x] = s / 3;
++      }
++  }
++}
++
++// Returns frame(t) -> {step, color} arrays for a W x H grid.
++function makePlanet(W, H) {
++  const N = W * H;
++  const CX = W / 2, CY = H / 2;
++  const P = PALETTE.map(hex);
++  const steps = new Uint8Array(N);
++  const colors = new Uint8Array(N);
++  const lut = new Uint8Array(32768).fill(255);
++  const nearest = (r, g, b) => {
++    const k = (Math.min(31, (r * 31.99) | 0) << 10) | (Math.min(31, (g * 31.99) | 0) << 5) | Math.min(31, (b * 31.99) | 0);
++    if (lut[k] !== 255) return lut[k];
++    let best = 0, bd = 1e9;
++    for (let i = 0; i < P.length; i++) {
++      const dr = P[i][0] - r, dg = P[i][1] - g, db = P[i][2] - b;
++      const d = 0.3 * dr * dr + 0.5 * dg * dg + 0.2 * db * db;
++      if (d < bd) (bd = d), (best = i);
++    }
++    return (lut[k] = best);
++  };
++
++  // --- the mark, read off the logo grid ---
++  const ink = INK.slice(1, -1).split('\n');
++  const GW = Math.max(...ink.map((l) => l.length)), GH = ink.length;
++  const at = (c, r) => (r >= 0 && r < GH && c >= 0 && c < GW && ink[r][c] && ink[r][c] !== ' ' ? 1 : 0);
++  let c0 = GW, c1 = 0, r0 = GH, r1 = 0;
++  for (let r = 0; r < GH; r++)
++    for (let c = 0; c < GW; c++)
++      if (at(c, r)) (c0 = Math.min(c0, c)), (c1 = Math.max(c1, c + 1)), (r0 = Math.min(r0, r)), (r1 = Math.max(r1, r + 1));
++  const cov = (u, v) => {
++    const x = u - 0.5, y = v - 0.5;
++    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
++    const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
++    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
++  };
++  const body = new Float32Array(N);
++  for (let r = 0; r < H; r++)
++    for (let x = 0; x < W; x++) {
++      const dx = (x + 0.5 - CX) / R, dy = (r + 0.5 - CY) / R;
++      if (dx * dx + dy * dy > 1.3) continue;
++      const u = c0 + ((dx + 1) / 2) * (c1 - c0), v = r0 + ((dy + 1) / 2) * (r1 - r0);
++      body[r * W + x] = cov(u, v);
++    }
++  blur(body, W, H, 2);
++  const solid = new Float32Array(N); // 1 on the planet
++  const cut = new Float32Array(N); // 1 inside a chasm
++  const glow = new Float32Array(N); // the chasms' light spilling onto their walls
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const d = Math.hypot(x + 0.5 - CX, r + 0.5 - CY);
++    const disc = smooth(R + 0.6, R - 0.6, d);
++    const m = smooth(0.38, 0.62, body[k]);
++    solid[k] = disc * m;
++    cut[k] = disc * (1 - m);
++    glow[k] = cut[k];
++  }
++  blur(glow, W, H, 1);
++
++  // --- the planet's surface, a band texture wrapped round its axis ---
++  const s2 = Math.SQRT1_2;
++  const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
++  const lat = new Float32Array(N), lon = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const a = (x + 0.5 - CX) / R, b = (r + 0.5 - CY) / R;
++    const q = a * a + b * b;
++    if (q >= 1.02) continue;
++    const z = Math.sqrt(Math.max(0, 1 - q));
++    (nx[k] = a), (ny[k] = b), (nz[k] = z);
++    lat[k] = Math.asin(Math.max(-1, Math.min(1, (a + b) * s2)));
++    lon[k] = Math.atan2((a - b) * s2, z);
++  }
++  const LA = 96, LO = 256;
++  const bands = new Float32Array(LA * LO);
++  for (let i = 0; i < LA; i++)
++    for (let j = 0; j < LO; j++) {
++      const la = i / LA, lo = j / LO;
++      const warp = fbm(lo * 12, la * 6, 3, 12) * 0.08;
++      const stripe = 0.5 + 0.5 * Math.sin((la + warp) * 38 + 1.6 * Math.sin(la * 17));
++      bands[i * LO + j] = 0.75 * stripe + 0.25 * fbm(lo * 16, la * 30, 3, 16);
++    }
++  // The stars, fixed (hashed on absolute cells, so they extend to any size).
++  const star = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const h = hash(x * 3 + 7, r * 5 + 1);
++    if (h > 0.986) star[k] = 0.35 + 0.65 * hash(x, r + 99);
++  }
++  const L = SUN.map((v) => v / Math.hypot(...SUN));
++  const LH = Math.hypot(L[0], L[1]);
++  const BACK = [CX + 18, CY + 18]; // the star behind the planet
++  const back = new Float32Array(N), facing = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    back[k] = Math.hypot(x + 0.5 - BACK[0], r + 0.5 - BACK[1]);
++    facing[k] = (nx[k] * L[0] + ny[k] * L[1]) / Math.max(1e-3, Math.hypot(nx[k], ny[k])) / LH;
++  }
++
++  return (t) => {
++    const spin = (t / 120) * LO; // the planet turns once in two minutes
++    const a = (t / ORBIT) * Math.PI * 2 + 2.2;
++    const ex = Math.cos(a) * 66, ey = Math.sin(a) * 11;
++    const tilt = -0.32;
++    const mx = CX + ex * Math.cos(tilt) - ey * Math.sin(tilt);
++    const my = CY + ex * Math.sin(tilt) + ey * Math.cos(tilt);
++    const front = Math.sin(a) > 0;
++    const mr = MOON_R * (1 + 0.08 * Math.sin(a));
++    for (let r = 0; r < H; r++) {
++      for (let x = 0; x < W; x++) {
++        const k = r * W + x;
++        const y = r + 0.5;
++        let v = 0, floor = 0;
++        const px = x + 0.5 - CX, py = y - CY;
++        const d = Math.sqrt(px * px + py * py);
++        const dmx = x + 0.5 - mx, dmy = y - my;
++        const dm = Math.sqrt(dmx * dmx + dmy * dmy);
++        // Far from the planet and the moon: only a star (or nothing).
++        if (d > R + 40 && dm > mr + 1) {
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            v = star[k] * tw;
++          } else {
++            steps[k] = 0;
++            continue;
++          }
++        } else {
++          const sp = solid[k];
++          const db = back[k];
++          const toward = 0.15 + 0.85 * smooth(80, 25, db);
++          const corona = Math.exp(-Math.max(0, d - R) / 1.6) * 0.55 + Math.exp(-Math.max(0, d - R) / 6) * 0.14 * toward;
++          let bg = corona * toward * smooth(R - 2, R + 0.5, d);
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            bg = Math.max(bg, star[k] * tw * smooth(R + 3, R + 14, d));
++          }
++          const c = cut[k];
++          if (c > 0) bg = Math.max(bg, c * (0.72 + 0.45 * Math.exp(-db / 30)));
++          v = bg;
++          if (sp > 0.001) {
++            const n0 = nx[k], n1 = ny[k], n2 = nz[k];
++            const day = n0 * L[0] + n1 * L[1] + n2 * L[2];
++            const li = (lat[k] / Math.PI + 0.5) * (LA - 1);
++            let lj = ((lon[k] / (Math.PI * 2) + 0.5) * LO + spin) % LO;
++            if (lj < 0) lj += LO;
++            const tex = bands[(li | 0) * LO + (lj | 0)];
++            const lit = smooth(-0.04, 0.2, day) * (0.03 + 0.7 * Math.pow(Math.max(0, day), 1.5));
++            let s = lit * (0.6 + 0.65 * tex);
++            const limb = smooth(0.9, 0.995, d / R);
++            const fc = facing[k];
++            s += limb * smooth(0.1, 0.8, fc) * 0.9;
++            s += glow[k] * 0.3;
++            s += smooth(0.86, 0.985, d / R) * 0.95 * toward * (1 - smooth(-0.3, 0.3, fc));
++            const night = 1 - smooth(-0.12, 0.06, day);
++            if (night > 0 && n2 > 0.15) {
++              const row = ((n0 + n1) * s2 * R) / 4;
++              const ri = Math.round(row);
++              if (Math.abs(row - ri) < 0.14) {
++                const seg = Math.floor((lon[k] + (spin / LO) * Math.PI * 2) * 26);
++                if (hash(seg, ri + 40) > 0.5) {
++                  const pulse = Math.pow(0.5 + 0.5 * Math.sin(seg * 0.5 - t * 2.4 * (0.6 + hash(ri, 3)) + ri * 2), 8);
++                  s += night * (0.3 + 0.7 * pulse) * (0.3 + 0.7 * n2);
++                }
++              }
++            }
++            v = v * (1 - sp) + s * sp;
++            floor = 0.07 * sp;
++          }
++          if (dm < mr + 0.6 && (front || sp < 0.5)) {
++            const a0 = dmx / mr, a1 = dmy / mr;
++            const z = Math.sqrt(Math.max(0, 1 - a0 * a0 - a1 * a1));
++            const mday = a0 * L[0] + a1 * L[1] + z * L[2];
++            const crater = 0.75 + 0.25 * fbm(dmx * 0.6 + 40, dmy * 0.6, 2, 0);
++            let s = smooth(-0.05, 0.25, mday) * (0.3 + 0.8 * Math.max(0, mday)) * crater;
++            s += smooth(0.75, 1, dm / mr) * smooth(0.2, 0.9, (a0 * L[0] + a1 * L[1]) / Math.max(1e-3, dm / mr) / LH) * 0.7;
++            s = Math.max(s, 0.05);
++            const edge = smooth(mr + 0.6, mr - 0.6, dm);
++            v = v * (1 - edge) + s * edge;
++            floor = Math.max(floor * (1 - edge), 0.22 * edge);
++          }
++        }
++        // Dot size from brightness, dithered; the colour makes up the rest.
++        const peak = Math.max(v, 1e-4);
++        const level = clamp(floor + (1 - floor) * Math.pow(peak, 0.85) * 0.95);
++        const step = Math.max(0, Math.min(3, Math.round(level * 3 + BAYER[(r & 3) * 4 + (x & 3)])));
++        steps[k] = step;
++        if (step) {
++          const want = Math.min(1, (level + 0.06) / COVER[step]);
++          const g = clamp((0.3 + 0.7 * want) * (0.22 + 0.78 * smooth(0, 0.6, peak)));
++          colors[k] = nearest(g, g, g);
++        }
++      }
++    }
++    return { steps, colors };
++  };
++}
++
++// --- drawing ---
++const canvas = document.getElementById('art');
++const ctx = canvas.getContext('2d');
++let grid = null; // {W, H, frame, sprites, px}
++const start = performance.now();
++
++function buildSprites(px) {
++  // One small canvas per (dot size, palette colour).
++  const sprites = [];
++  for (let step = 1; step <= 3; step++) {
++    sprites[step] = PALETTE.map((color) => {
++      const c = new OffscreenCanvas(px, px);
++      const g = c.getContext('2d');
++      g.fillStyle = color;
++      g.beginPath();
++      g.arc(px / 2, px / 2, (px / 2) * 0.9 * COVER[step], 0, Math.PI * 2);
++      g.fill();
++      return c;
++    });
++  }
++  return sprites;
++}
++
++function resize() {
++  const dpr = window.devicePixelRatio || 1;
++  const w = window.innerWidth, h = window.innerHeight;
++  canvas.width = Math.round(w * dpr);
++  canvas.height = Math.round(h * dpr);
++  const W = Math.ceil(w / CELL), H = Math.ceil(h / CELL);
++  const px = CELL * dpr;
++  // Center the grid on the page (the planet sits in the middle).
++  const ox = (canvas.width - W * px) / 2, oy = (canvas.height - H * px) / 2;
++  grid = { W, H, px, ox, oy, frame: makePlanet(W, H), sprites: buildSprites(Math.ceil(px)) };
++  draw();
++}
++
++function draw() {
++  if (!grid) return;
++  const { W, H, px, ox, oy, frame, sprites } = grid;
++  const { steps, colors } = frame((performance.now() - start) / 1000);
++  ctx.clearRect(0, 0, canvas.width, canvas.height);
++  for (let r = 0; r < H; r++) {
++    const y = oy + r * px;
++    for (let x = 0; x < W; x++) {
++      const k = r * W + x;
++      const step = steps[k];
++      if (step) ctx.drawImage(sprites[step][colors[k]], ox + x * px, y);
++    }
++  }
++}
++
++let resizeTimer = 0;
++window.addEventListener('resize', () => {
++  clearTimeout(resizeTimer);
++  resizeTimer = setTimeout(resize, 120);
++});
++resize();
++let last = 0;
++function tick(now) {
++  if (now - last >= 1000 / FPS) {
++    last = now;
++    draw();
++  }
++  requestAnimationFrame(tick);
++}
++requestAnimationFrame(tick);
++
++// --- summary (placeholder until the Figma summary is in) ---
++const timeEl = document.getElementById('time');
++const dateEl = document.getElementById('date');
++function updateClock() {
++  const now = new Date();
++  timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
++  dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
++}
++updateClock();
++setInterval(updateClock, 10000);
++
++// --- search ---
++const form = document.getElementById('search');
++const input = document.getElementById('q');
++form.addEventListener('submit', (e) => {
++  e.preventDefault();
++  const text = input.value.trim();
++  if (text) chrome.send('search', [text]);
++});
++input.addEventListener('keydown', (e) => {
++  if (e.key === 'Escape') input.value = '';
++});
++input.focus();
+diff --git a/chrome/browser/ui/webui/saturn_start/resources/start_tail.js b/chrome/browser/ui/webui/saturn_start/resources/start_tail.js
+new file mode 100644
+index 0000000..8aed534
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/resources/start_tail.js
+@@ -0,0 +1,358 @@
++// Saturn start page: a dot-art planet behind the search box. The art is
++// "planet scale" (a dark planet cut into a mark, backlit, a moon circling),
++// reworked so the grid covers the whole page: the planet keeps its size in
++// cells and the procedural star field simply extends to the edges.
++
++const CELL = 5; // css px per cell (smaller than the original's)
++const FPS = 15;
++const R = 41; // the planet, in cells
++const SUN = [-0.68, -0.68, 0.2]; // toward the sun: upper left, a little toward us
++const MOON_R = 7;
++const ORBIT = 16; // seconds for the moon to go round
++const COVER = [0, 0.3, 0.6, 1]; // how much each dot fills, against the largest
++const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => v / 16 - 0.47);
++const PALETTE = [
++  '#101010', '#181818', '#202020', '#282828', '#303030', '#3a3a3a', '#444444', '#4e4e4e',
++  '#585858', '#636363', '#6e6e6e', '#797979', '#858585', '#919191', '#9d9d9d', '#a9a9a9',
++  '#b5b5b5', '#c1c1c1', '#cccccc', '#d7d7d7', '#e1e1e1', '#eaeaea', '#f3f3f3', '#ffffff',
++];
++
++function hash(x, y) {
++  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
++  h = Math.imul(h ^ (h >>> 13), 1274126177);
++  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
++}
++// Value noise, wrapping every `period` lattice cells in x when period > 0.
++function noise(x, y, period) {
++  const xi = Math.floor(x), yi = Math.floor(y);
++  const fx = x - xi, fy = y - yi;
++  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
++  let x0 = xi, x1 = xi + 1;
++  if (period) {
++    x0 = ((xi % period) + period) % period;
++    x1 = (x0 + 1) % period;
++  }
++  const a = hash(x0, yi), b = hash(x1, yi), c = hash(x0, yi + 1), d = hash(x1, yi + 1);
++  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
++}
++function fbm(x, y, octaves, period) {
++  let s = 0, n = 0, amp = 0.5, f = 1;
++  for (let i = 0; i < octaves; i++) {
++    s += amp * noise(x * f, y * f, period * f);
++    n += amp;
++    amp *= 0.5;
++    f *= 2;
++  }
++  return s / n;
++}
++const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
++const smooth = (a, b, v) => {
++  const k = clamp((v - a) / (b - a));
++  return k * k * (3 - 2 * k);
++};
++const hex = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
++
++// A 3x3 box blur, `passes` times over, in place.
++function blur(a, W, H, passes) {
++  const b = new Float32Array(a.length);
++  for (let p = 0; p < passes; p++) {
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += a[r * W + Math.min(W - 1, Math.max(0, x + i))];
++        b[r * W + x] = s / 3;
++      }
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += b[Math.min(H - 1, Math.max(0, r + i)) * W + x];
++        a[r * W + x] = s / 3;
++      }
++  }
++}
++
++// Returns frame(t) -> {step, color} arrays for a W x H grid.
++function makePlanet(W, H) {
++  const N = W * H;
++  const CX = W / 2, CY = H / 2;
++  const P = PALETTE.map(hex);
++  const steps = new Uint8Array(N);
++  const colors = new Uint8Array(N);
++  const lut = new Uint8Array(32768).fill(255);
++  const nearest = (r, g, b) => {
++    const k = (Math.min(31, (r * 31.99) | 0) << 10) | (Math.min(31, (g * 31.99) | 0) << 5) | Math.min(31, (b * 31.99) | 0);
++    if (lut[k] !== 255) return lut[k];
++    let best = 0, bd = 1e9;
++    for (let i = 0; i < P.length; i++) {
++      const dr = P[i][0] - r, dg = P[i][1] - g, db = P[i][2] - b;
++      const d = 0.3 * dr * dr + 0.5 * dg * dg + 0.2 * db * db;
++      if (d < bd) (bd = d), (best = i);
++    }
++    return (lut[k] = best);
++  };
++
++  // --- the mark, read off the logo grid ---
++  const ink = INK.slice(1, -1).split('\n');
++  const GW = Math.max(...ink.map((l) => l.length)), GH = ink.length;
++  const at = (c, r) => (r >= 0 && r < GH && c >= 0 && c < GW && ink[r][c] && ink[r][c] !== ' ' ? 1 : 0);
++  let c0 = GW, c1 = 0, r0 = GH, r1 = 0;
++  for (let r = 0; r < GH; r++)
++    for (let c = 0; c < GW; c++)
++      if (at(c, r)) (c0 = Math.min(c0, c)), (c1 = Math.max(c1, c + 1)), (r0 = Math.min(r0, r)), (r1 = Math.max(r1, r + 1));
++  const cov = (u, v) => {
++    const x = u - 0.5, y = v - 0.5;
++    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
++    const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
++    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
++  };
++  const body = new Float32Array(N);
++  for (let r = 0; r < H; r++)
++    for (let x = 0; x < W; x++) {
++      const dx = (x + 0.5 - CX) / R, dy = (r + 0.5 - CY) / R;
++      if (dx * dx + dy * dy > 1.3) continue;
++      const u = c0 + ((dx + 1) / 2) * (c1 - c0), v = r0 + ((dy + 1) / 2) * (r1 - r0);
++      body[r * W + x] = cov(u, v);
++    }
++  blur(body, W, H, 2);
++  const solid = new Float32Array(N); // 1 on the planet
++  const cut = new Float32Array(N); // 1 inside a chasm
++  const glow = new Float32Array(N); // the chasms' light spilling onto their walls
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const d = Math.hypot(x + 0.5 - CX, r + 0.5 - CY);
++    const disc = smooth(R + 0.6, R - 0.6, d);
++    const m = smooth(0.38, 0.62, body[k]);
++    solid[k] = disc * m;
++    cut[k] = disc * (1 - m);
++    glow[k] = cut[k];
++  }
++  blur(glow, W, H, 1);
++
++  // --- the planet's surface, a band texture wrapped round its axis ---
++  const s2 = Math.SQRT1_2;
++  const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
++  const lat = new Float32Array(N), lon = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const a = (x + 0.5 - CX) / R, b = (r + 0.5 - CY) / R;
++    const q = a * a + b * b;
++    if (q >= 1.02) continue;
++    const z = Math.sqrt(Math.max(0, 1 - q));
++    (nx[k] = a), (ny[k] = b), (nz[k] = z);
++    lat[k] = Math.asin(Math.max(-1, Math.min(1, (a + b) * s2)));
++    lon[k] = Math.atan2((a - b) * s2, z);
++  }
++  const LA = 96, LO = 256;
++  const bands = new Float32Array(LA * LO);
++  for (let i = 0; i < LA; i++)
++    for (let j = 0; j < LO; j++) {
++      const la = i / LA, lo = j / LO;
++      const warp = fbm(lo * 12, la * 6, 3, 12) * 0.08;
++      const stripe = 0.5 + 0.5 * Math.sin((la + warp) * 38 + 1.6 * Math.sin(la * 17));
++      bands[i * LO + j] = 0.75 * stripe + 0.25 * fbm(lo * 16, la * 30, 3, 16);
++    }
++  // The stars, fixed (hashed on absolute cells, so they extend to any size).
++  const star = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const h = hash(x * 3 + 7, r * 5 + 1);
++    if (h > 0.986) star[k] = 0.35 + 0.65 * hash(x, r + 99);
++  }
++  const L = SUN.map((v) => v / Math.hypot(...SUN));
++  const LH = Math.hypot(L[0], L[1]);
++  const BACK = [CX + 18, CY + 18]; // the star behind the planet
++  const back = new Float32Array(N), facing = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    back[k] = Math.hypot(x + 0.5 - BACK[0], r + 0.5 - BACK[1]);
++    facing[k] = (nx[k] * L[0] + ny[k] * L[1]) / Math.max(1e-3, Math.hypot(nx[k], ny[k])) / LH;
++  }
++
++  return (t) => {
++    const spin = (t / 120) * LO; // the planet turns once in two minutes
++    const a = (t / ORBIT) * Math.PI * 2 + 2.2;
++    const ex = Math.cos(a) * 66, ey = Math.sin(a) * 11;
++    const tilt = -0.32;
++    const mx = CX + ex * Math.cos(tilt) - ey * Math.sin(tilt);
++    const my = CY + ex * Math.sin(tilt) + ey * Math.cos(tilt);
++    const front = Math.sin(a) > 0;
++    const mr = MOON_R * (1 + 0.08 * Math.sin(a));
++    for (let r = 0; r < H; r++) {
++      for (let x = 0; x < W; x++) {
++        const k = r * W + x;
++        const y = r + 0.5;
++        let v = 0, floor = 0;
++        const px = x + 0.5 - CX, py = y - CY;
++        const d = Math.sqrt(px * px + py * py);
++        const dmx = x + 0.5 - mx, dmy = y - my;
++        const dm = Math.sqrt(dmx * dmx + dmy * dmy);
++        // Far from the planet and the moon: only a star (or nothing).
++        if (d > R + 40 && dm > mr + 1) {
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            v = star[k] * tw;
++          } else {
++            steps[k] = 0;
++            continue;
++          }
++        } else {
++          const sp = solid[k];
++          const db = back[k];
++          const toward = 0.15 + 0.85 * smooth(80, 25, db);
++          const corona = Math.exp(-Math.max(0, d - R) / 1.6) * 0.55 + Math.exp(-Math.max(0, d - R) / 6) * 0.14 * toward;
++          let bg = corona * toward * smooth(R - 2, R + 0.5, d);
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            bg = Math.max(bg, star[k] * tw * smooth(R + 3, R + 14, d));
++          }
++          const c = cut[k];
++          if (c > 0) bg = Math.max(bg, c * (0.72 + 0.45 * Math.exp(-db / 30)));
++          v = bg;
++          if (sp > 0.001) {
++            const n0 = nx[k], n1 = ny[k], n2 = nz[k];
++            const day = n0 * L[0] + n1 * L[1] + n2 * L[2];
++            const li = (lat[k] / Math.PI + 0.5) * (LA - 1);
++            let lj = ((lon[k] / (Math.PI * 2) + 0.5) * LO + spin) % LO;
++            if (lj < 0) lj += LO;
++            const tex = bands[(li | 0) * LO + (lj | 0)];
++            const lit = smooth(-0.04, 0.2, day) * (0.03 + 0.7 * Math.pow(Math.max(0, day), 1.5));
++            let s = lit * (0.6 + 0.65 * tex);
++            const limb = smooth(0.9, 0.995, d / R);
++            const fc = facing[k];
++            s += limb * smooth(0.1, 0.8, fc) * 0.9;
++            s += glow[k] * 0.3;
++            s += smooth(0.86, 0.985, d / R) * 0.95 * toward * (1 - smooth(-0.3, 0.3, fc));
++            const night = 1 - smooth(-0.12, 0.06, day);
++            if (night > 0 && n2 > 0.15) {
++              const row = ((n0 + n1) * s2 * R) / 4;
++              const ri = Math.round(row);
++              if (Math.abs(row - ri) < 0.14) {
++                const seg = Math.floor((lon[k] + (spin / LO) * Math.PI * 2) * 26);
++                if (hash(seg, ri + 40) > 0.5) {
++                  const pulse = Math.pow(0.5 + 0.5 * Math.sin(seg * 0.5 - t * 2.4 * (0.6 + hash(ri, 3)) + ri * 2), 8);
++                  s += night * (0.3 + 0.7 * pulse) * (0.3 + 0.7 * n2);
++                }
++              }
++            }
++            v = v * (1 - sp) + s * sp;
++            floor = 0.07 * sp;
++          }
++          if (dm < mr + 0.6 && (front || sp < 0.5)) {
++            const a0 = dmx / mr, a1 = dmy / mr;
++            const z = Math.sqrt(Math.max(0, 1 - a0 * a0 - a1 * a1));
++            const mday = a0 * L[0] + a1 * L[1] + z * L[2];
++            const crater = 0.75 + 0.25 * fbm(dmx * 0.6 + 40, dmy * 0.6, 2, 0);
++            let s = smooth(-0.05, 0.25, mday) * (0.3 + 0.8 * Math.max(0, mday)) * crater;
++            s += smooth(0.75, 1, dm / mr) * smooth(0.2, 0.9, (a0 * L[0] + a1 * L[1]) / Math.max(1e-3, dm / mr) / LH) * 0.7;
++            s = Math.max(s, 0.05);
++            const edge = smooth(mr + 0.6, mr - 0.6, dm);
++            v = v * (1 - edge) + s * edge;
++            floor = Math.max(floor * (1 - edge), 0.22 * edge);
++          }
++        }
++        // Dot size from brightness, dithered; the colour makes up the rest.
++        const peak = Math.max(v, 1e-4);
++        const level = clamp(floor + (1 - floor) * Math.pow(peak, 0.85) * 0.95);
++        const step = Math.max(0, Math.min(3, Math.round(level * 3 + BAYER[(r & 3) * 4 + (x & 3)])));
++        steps[k] = step;
++        if (step) {
++          const want = Math.min(1, (level + 0.06) / COVER[step]);
++          const g = clamp((0.3 + 0.7 * want) * (0.22 + 0.78 * smooth(0, 0.6, peak)));
++          colors[k] = nearest(g, g, g);
++        }
++      }
++    }
++    return { steps, colors };
++  };
++}
++
++// --- drawing ---
++const canvas = document.getElementById('art');
++const ctx = canvas.getContext('2d');
++let grid = null; // {W, H, frame, sprites, px}
++const start = performance.now();
++
++function buildSprites(px) {
++  // One small canvas per (dot size, palette colour).
++  const sprites = [];
++  for (let step = 1; step <= 3; step++) {
++    sprites[step] = PALETTE.map((color) => {
++      const c = new OffscreenCanvas(px, px);
++      const g = c.getContext('2d');
++      g.fillStyle = color;
++      g.beginPath();
++      g.arc(px / 2, px / 2, (px / 2) * 0.9 * COVER[step], 0, Math.PI * 2);
++      g.fill();
++      return c;
++    });
++  }
++  return sprites;
++}
++
++function resize() {
++  const dpr = window.devicePixelRatio || 1;
++  const w = window.innerWidth, h = window.innerHeight;
++  canvas.width = Math.round(w * dpr);
++  canvas.height = Math.round(h * dpr);
++  const W = Math.ceil(w / CELL), H = Math.ceil(h / CELL);
++  const px = CELL * dpr;
++  // Center the grid on the page (the planet sits in the middle).
++  const ox = (canvas.width - W * px) / 2, oy = (canvas.height - H * px) / 2;
++  grid = { W, H, px, ox, oy, frame: makePlanet(W, H), sprites: buildSprites(Math.ceil(px)) };
++  draw();
++}
++
++function draw() {
++  if (!grid) return;
++  const { W, H, px, ox, oy, frame, sprites } = grid;
++  const { steps, colors } = frame((performance.now() - start) / 1000);
++  ctx.clearRect(0, 0, canvas.width, canvas.height);
++  for (let r = 0; r < H; r++) {
++    const y = oy + r * px;
++    for (let x = 0; x < W; x++) {
++      const k = r * W + x;
++      const step = steps[k];
++      if (step) ctx.drawImage(sprites[step][colors[k]], ox + x * px, y);
++    }
++  }
++}
++
++let resizeTimer = 0;
++window.addEventListener('resize', () => {
++  clearTimeout(resizeTimer);
++  resizeTimer = setTimeout(resize, 120);
++});
++resize();
++let last = 0;
++function tick(now) {
++  if (now - last >= 1000 / FPS) {
++    last = now;
++    draw();
++  }
++  requestAnimationFrame(tick);
++}
++requestAnimationFrame(tick);
++
++// --- summary (placeholder until the Figma summary is in) ---
++const timeEl = document.getElementById('time');
++const dateEl = document.getElementById('date');
++function updateClock() {
++  const now = new Date();
++  timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
++  dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
++}
++updateClock();
++setInterval(updateClock, 10000);
++
++// --- search ---
++const form = document.getElementById('search');
++const input = document.getElementById('q');
++form.addEventListener('submit', (e) => {
++  e.preventDefault();
++  const text = input.value.trim();
++  if (text) chrome.send('search', [text]);
++});
++input.addEventListener('keydown', (e) => {
++  if (e.key === 'Escape') input.value = '';
++});
++input.focus();
+diff --git a/chrome/browser/ui/webui/saturn_start/saturn_start_page.h b/chrome/browser/ui/webui/saturn_start/saturn_start_page.h
+new file mode 100644
+index 0000000..9a77f9b
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/saturn_start_page.h
+@@ -0,0 +1,536 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated by saturn/scripts/gen_start_page.py from resources/. Do not
++// edit by hand.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_PAGE_H_
++#define CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_PAGE_H_
++
++namespace saturn_start {
++
++inline constexpr char kHtml[] =
++    R"SATURN(<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>Start</title>
++<link rel="stylesheet" href="start.css">
++</head>
++<body>
++<canvas id="art" aria-hidden="true"></canvas>
++<main>
++  <section id="summary" aria-live="polite">
++    <div id="time"></div>
++    <div id="date"></div>
++  </section>
++  <form id="search" role="search">
++    <input id="q" type="text" autocomplete="off" spellcheck="false"
++           placeholder="Search anything" aria-label="Search anything" autofocus>
++    <img src="search.svg" alt="" width="20" height="20">
++  </form>
++</main>
++<script type="module" src="start.js"></script>
++</body>
++</html>
++)SATURN";
++
++inline constexpr char kCss[] =
++    R"SATURN(@font-face {
++  font-family: Inter;
++  src: url(Inter-Regular.ttf);
++  font-weight: 400;
++}
++@font-face {
++  font-family: Inter;
++  src: url(Inter-Medium.ttf);
++  font-weight: 500;
++}
++
++html,
++body {
++  margin: 0;
++  height: 100%;
++  overflow: hidden;
++  /* See-through: the window's acrylic shows behind this. */
++  background: rgba(0, 0, 0, 0.5);
++  color: #fff;
++  font-family: Inter, "Segoe UI", sans-serif;
++  -webkit-font-smoothing: antialiased;
++}
++
++#art {
++  position: fixed;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++}
++
++main {
++  position: relative;
++  height: 100%;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  gap: 20px;
++}
++
++#summary {
++  text-align: center;
++  user-select: none;
++}
++#time {
++  font-size: 40px;
++  font-weight: 500;
++  letter-spacing: -0.02em;
++}
++#date {
++  margin-top: 4px;
++  font-size: 14px;
++  color: rgba(255, 255, 255, 0.6);
++}
++
++#search {
++  position: relative;
++  width: clamp(300px, 40vw, 800px);
++  height: 38px;
++  margin: 0;
++}
++#q {
++  box-sizing: border-box;
++  width: 100%;
++  height: 100%;
++  margin: 0;
++  padding: 0 40px 0 12px;
++  border: 0;
++  border-radius: 10px;
++  outline: none;
++  background: rgba(255, 255, 255, 0.15);
++  color: #fff;
++  font: 14px Inter, "Segoe UI", sans-serif;
++  caret-color: #fff;
++}
++#q::placeholder {
++  color: rgba(255, 255, 255, 0.6);
++}
++#search img {
++  position: absolute;
++  right: 9px;
++  top: 9px;
++  pointer-events: none;
++}
++)SATURN";
++
++inline constexpr char kJs[] =
++    R"SATURN(// The silhouette of src/pieces/planetscale.ts: 0 is the logo, a space is not.
++const INK = String.raw `
++
++                  00000000000000000000
++              0000000000000000000000000000
++           0000000000000000000000000000000000
++         00000000000000000000000000000000000000
++       000000000000000000000000000000000000000000
++      00000000000000000000000000000000000000000000
++     0000000000000000000000000000000000000000000000
++    000000000000000000000000000000000000000000000000
++   000000000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000000000
++  000000000000000000000000000000000000000000000
++  0000000000000000000000000000000000000000000
++  00000000000000000000000000000000000000000
++  00000000000000000000000000    000000000           00
++  000000000000000000000000    000000000           0000
++  0000000000000000000000    000000000           000000
++  00000000000000000000    000000000           00000000
++   00000000000000000    000000000           000000000
++    00000000000000    000000000           0000000000
++     00000000000    000000000           00000000000
++      00000000    000000000           000000000000
++       00000    000000000           0000000000000
++         0    000000000           0000000000000
++             00000000           0000000000000
++              00000           000000000000
++                            0000000000
++
++`;
++
++// Saturn start page: a dot-art planet behind the search box. The art is
++// "planet scale" (a dark planet cut into a mark, backlit, a moon circling),
++// reworked so the grid covers the whole page: the planet keeps its size in
++// cells and the procedural star field simply extends to the edges.
++
++const CELL = 5; // css px per cell (smaller than the original's)
++const FPS = 15;
++const R = 41; // the planet, in cells
++const SUN = [-0.68, -0.68, 0.2]; // toward the sun: upper left, a little toward us
++const MOON_R = 7;
++const ORBIT = 16; // seconds for the moon to go round
++const COVER = [0, 0.3, 0.6, 1]; // how much each dot fills, against the largest
++const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => v / 16 - 0.47);
++const PALETTE = [
++  '#101010', '#181818', '#202020', '#282828', '#303030', '#3a3a3a', '#444444', '#4e4e4e',
++  '#585858', '#636363', '#6e6e6e', '#797979', '#858585', '#919191', '#9d9d9d', '#a9a9a9',
++  '#b5b5b5', '#c1c1c1', '#cccccc', '#d7d7d7', '#e1e1e1', '#eaeaea', '#f3f3f3', '#ffffff',
++];
++
++function hash(x, y) {
++  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
++  h = Math.imul(h ^ (h >>> 13), 1274126177);
++  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
++}
++// Value noise, wrapping every `period` lattice cells in x when period > 0.
++function noise(x, y, period) {
++  const xi = Math.floor(x), yi = Math.floor(y);
++  const fx = x - xi, fy = y - yi;
++  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
++  let x0 = xi, x1 = xi + 1;
++  if (period) {
++    x0 = ((xi % period) + period) % period;
++    x1 = (x0 + 1) % period;
++  }
++  const a = hash(x0, yi), b = hash(x1, yi), c = hash(x0, yi + 1), d = hash(x1, yi + 1);
++  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
++}
++function fbm(x, y, octaves, period) {
++  let s = 0, n = 0, amp = 0.5, f = 1;
++  for (let i = 0; i < octaves; i++) {
++    s += amp * noise(x * f, y * f, period * f);
++    n += amp;
++    amp *= 0.5;
++    f *= 2;
++  }
++  return s / n;
++}
++const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
++const smooth = (a, b, v) => {
++  const k = clamp((v - a) / (b - a));
++  return k * k * (3 - 2 * k);
++};
++const hex = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
++
++// A 3x3 box blur, `passes` times over, in place.
++function blur(a, W, H, passes) {
++  const b = new Float32Array(a.length);
++  for (let p = 0; p < passes; p++) {
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += a[r * W + Math.min(W - 1, Math.max(0, x + i))];
++        b[r * W + x] = s / 3;
++      }
++    for (let r = 0; r < H; r++)
++      for (let x = 0; x < W; x++) {
++        let s = 0;
++        for (let i = -1; i <= 1; i++) s += b[Math.min(H - 1, Math.max(0, r + i)) * W + x];
++        a[r * W + x] = s / 3;
++      }
++  }
++}
++
++// Returns frame(t) -> {step, color} arrays for a W x H grid.
++function makePlanet(W, H) {
++  const N = W * H;
++  const CX = W / 2, CY = H / 2;
++  const P = PALETTE.map(hex);
++  const steps = new Uint8Array(N);
++  const colors = new Uint8Array(N);
++  const lut = new Uint8Array(32768).fill(255);
++  const nearest = (r, g, b) => {
++    const k = (Math.min(31, (r * 31.99) | 0) << 10) | (Math.min(31, (g * 31.99) | 0) << 5) | Math.min(31, (b * 31.99) | 0);
++    if (lut[k] !== 255) return lut[k];
++    let best = 0, bd = 1e9;
++    for (let i = 0; i < P.length; i++) {
++      const dr = P[i][0] - r, dg = P[i][1] - g, db = P[i][2] - b;
++      const d = 0.3 * dr * dr + 0.5 * dg * dg + 0.2 * db * db;
++      if (d < bd) (bd = d), (best = i);
++    }
++    return (lut[k] = best);
++  };
++
++  // --- the mark, read off the logo grid ---
++  const ink = INK.slice(1, -1).split('\n');
++  const GW = Math.max(...ink.map((l) => l.length)), GH = ink.length;
++  const at = (c, r) => (r >= 0 && r < GH && c >= 0 && c < GW && ink[r][c] && ink[r][c] !== ' ' ? 1 : 0);
++  let c0 = GW, c1 = 0, r0 = GH, r1 = 0;
++  for (let r = 0; r < GH; r++)
++    for (let c = 0; c < GW; c++)
++      if (at(c, r)) (c0 = Math.min(c0, c)), (c1 = Math.max(c1, c + 1)), (r0 = Math.min(r0, r)), (r1 = Math.max(r1, r + 1));
++  const cov = (u, v) => {
++    const x = u - 0.5, y = v - 0.5;
++    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
++    const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
++    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
++  };
++  const body = new Float32Array(N);
++  for (let r = 0; r < H; r++)
++    for (let x = 0; x < W; x++) {
++      const dx = (x + 0.5 - CX) / R, dy = (r + 0.5 - CY) / R;
++      if (dx * dx + dy * dy > 1.3) continue;
++      const u = c0 + ((dx + 1) / 2) * (c1 - c0), v = r0 + ((dy + 1) / 2) * (r1 - r0);
++      body[r * W + x] = cov(u, v);
++    }
++  blur(body, W, H, 2);
++  const solid = new Float32Array(N); // 1 on the planet
++  const cut = new Float32Array(N); // 1 inside a chasm
++  const glow = new Float32Array(N); // the chasms' light spilling onto their walls
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const d = Math.hypot(x + 0.5 - CX, r + 0.5 - CY);
++    const disc = smooth(R + 0.6, R - 0.6, d);
++    const m = smooth(0.38, 0.62, body[k]);
++    solid[k] = disc * m;
++    cut[k] = disc * (1 - m);
++    glow[k] = cut[k];
++  }
++  blur(glow, W, H, 1);
++
++  // --- the planet's surface, a band texture wrapped round its axis ---
++  const s2 = Math.SQRT1_2;
++  const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
++  const lat = new Float32Array(N), lon = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const a = (x + 0.5 - CX) / R, b = (r + 0.5 - CY) / R;
++    const q = a * a + b * b;
++    if (q >= 1.02) continue;
++    const z = Math.sqrt(Math.max(0, 1 - q));
++    (nx[k] = a), (ny[k] = b), (nz[k] = z);
++    lat[k] = Math.asin(Math.max(-1, Math.min(1, (a + b) * s2)));
++    lon[k] = Math.atan2((a - b) * s2, z);
++  }
++  const LA = 96, LO = 256;
++  const bands = new Float32Array(LA * LO);
++  for (let i = 0; i < LA; i++)
++    for (let j = 0; j < LO; j++) {
++      const la = i / LA, lo = j / LO;
++      const warp = fbm(lo * 12, la * 6, 3, 12) * 0.08;
++      const stripe = 0.5 + 0.5 * Math.sin((la + warp) * 38 + 1.6 * Math.sin(la * 17));
++      bands[i * LO + j] = 0.75 * stripe + 0.25 * fbm(lo * 16, la * 30, 3, 16);
++    }
++  // The stars, fixed (hashed on absolute cells, so they extend to any size).
++  const star = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    const h = hash(x * 3 + 7, r * 5 + 1);
++    if (h > 0.986) star[k] = 0.35 + 0.65 * hash(x, r + 99);
++  }
++  const L = SUN.map((v) => v / Math.hypot(...SUN));)SATURN"
++    R"SATURN(
++  const LH = Math.hypot(L[0], L[1]);
++  const BACK = [CX + 18, CY + 18]; // the star behind the planet
++  const back = new Float32Array(N), facing = new Float32Array(N);
++  for (let k = 0; k < N; k++) {
++    const x = k % W, r = (k / W) | 0;
++    back[k] = Math.hypot(x + 0.5 - BACK[0], r + 0.5 - BACK[1]);
++    facing[k] = (nx[k] * L[0] + ny[k] * L[1]) / Math.max(1e-3, Math.hypot(nx[k], ny[k])) / LH;
++  }
++
++  return (t) => {
++    const spin = (t / 120) * LO; // the planet turns once in two minutes
++    const a = (t / ORBIT) * Math.PI * 2 + 2.2;
++    const ex = Math.cos(a) * 66, ey = Math.sin(a) * 11;
++    const tilt = -0.32;
++    const mx = CX + ex * Math.cos(tilt) - ey * Math.sin(tilt);
++    const my = CY + ex * Math.sin(tilt) + ey * Math.cos(tilt);
++    const front = Math.sin(a) > 0;
++    const mr = MOON_R * (1 + 0.08 * Math.sin(a));
++    for (let r = 0; r < H; r++) {
++      for (let x = 0; x < W; x++) {
++        const k = r * W + x;
++        const y = r + 0.5;
++        let v = 0, floor = 0;
++        const px = x + 0.5 - CX, py = y - CY;
++        const d = Math.sqrt(px * px + py * py);
++        const dmx = x + 0.5 - mx, dmy = y - my;
++        const dm = Math.sqrt(dmx * dmx + dmy * dmy);
++        // Far from the planet and the moon: only a star (or nothing).
++        if (d > R + 40 && dm > mr + 1) {
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            v = star[k] * tw;
++          } else {
++            steps[k] = 0;
++            continue;
++          }
++        } else {
++          const sp = solid[k];
++          const db = back[k];
++          const toward = 0.15 + 0.85 * smooth(80, 25, db);
++          const corona = Math.exp(-Math.max(0, d - R) / 1.6) * 0.55 + Math.exp(-Math.max(0, d - R) / 6) * 0.14 * toward;
++          let bg = corona * toward * smooth(R - 2, R + 0.5, d);
++          if (star[k]) {
++            const tw = 0.65 + 0.35 * Math.sin(t * (1.3 + hash(x, r) * 2.5) + hash(r, x) * 6.28);
++            bg = Math.max(bg, star[k] * tw * smooth(R + 3, R + 14, d));
++          }
++          const c = cut[k];
++          if (c > 0) bg = Math.max(bg, c * (0.72 + 0.45 * Math.exp(-db / 30)));
++          v = bg;
++          if (sp > 0.001) {
++            const n0 = nx[k], n1 = ny[k], n2 = nz[k];
++            const day = n0 * L[0] + n1 * L[1] + n2 * L[2];
++            const li = (lat[k] / Math.PI + 0.5) * (LA - 1);
++            let lj = ((lon[k] / (Math.PI * 2) + 0.5) * LO + spin) % LO;
++            if (lj < 0) lj += LO;
++            const tex = bands[(li | 0) * LO + (lj | 0)];
++            const lit = smooth(-0.04, 0.2, day) * (0.03 + 0.7 * Math.pow(Math.max(0, day), 1.5));
++            let s = lit * (0.6 + 0.65 * tex);
++            const limb = smooth(0.9, 0.995, d / R);
++            const fc = facing[k];
++            s += limb * smooth(0.1, 0.8, fc) * 0.9;
++            s += glow[k] * 0.3;
++            s += smooth(0.86, 0.985, d / R) * 0.95 * toward * (1 - smooth(-0.3, 0.3, fc));
++            const night = 1 - smooth(-0.12, 0.06, day);
++            if (night > 0 && n2 > 0.15) {
++              const row = ((n0 + n1) * s2 * R) / 4;
++              const ri = Math.round(row);
++              if (Math.abs(row - ri) < 0.14) {
++                const seg = Math.floor((lon[k] + (spin / LO) * Math.PI * 2) * 26);
++                if (hash(seg, ri + 40) > 0.5) {
++                  const pulse = Math.pow(0.5 + 0.5 * Math.sin(seg * 0.5 - t * 2.4 * (0.6 + hash(ri, 3)) + ri * 2), 8);
++                  s += night * (0.3 + 0.7 * pulse) * (0.3 + 0.7 * n2);
++                }
++              }
++            }
++            v = v * (1 - sp) + s * sp;
++            floor = 0.07 * sp;
++          }
++          if (dm < mr + 0.6 && (front || sp < 0.5)) {
++            const a0 = dmx / mr, a1 = dmy / mr;
++            const z = Math.sqrt(Math.max(0, 1 - a0 * a0 - a1 * a1));
++            const mday = a0 * L[0] + a1 * L[1] + z * L[2];
++            const crater = 0.75 + 0.25 * fbm(dmx * 0.6 + 40, dmy * 0.6, 2, 0);
++            let s = smooth(-0.05, 0.25, mday) * (0.3 + 0.8 * Math.max(0, mday)) * crater;
++            s += smooth(0.75, 1, dm / mr) * smooth(0.2, 0.9, (a0 * L[0] + a1 * L[1]) / Math.max(1e-3, dm / mr) / LH) * 0.7;
++            s = Math.max(s, 0.05);
++            const edge = smooth(mr + 0.6, mr - 0.6, dm);
++            v = v * (1 - edge) + s * edge;
++            floor = Math.max(floor * (1 - edge), 0.22 * edge);
++          }
++        }
++        // Dot size from brightness, dithered; the colour makes up the rest.
++        const peak = Math.max(v, 1e-4);
++        const level = clamp(floor + (1 - floor) * Math.pow(peak, 0.85) * 0.95);
++        const step = Math.max(0, Math.min(3, Math.round(level * 3 + BAYER[(r & 3) * 4 + (x & 3)])));
++        steps[k] = step;
++        if (step) {
++          const want = Math.min(1, (level + 0.06) / COVER[step]);
++          const g = clamp((0.3 + 0.7 * want) * (0.22 + 0.78 * smooth(0, 0.6, peak)));
++          colors[k] = nearest(g, g, g);
++        }
++      }
++    }
++    return { steps, colors };
++  };
++}
++
++// --- drawing ---
++const canvas = document.getElementById('art');
++const ctx = canvas.getContext('2d');
++let grid = null; // {W, H, frame, sprites, px}
++const start = performance.now();
++
++function buildSprites(px) {
++  // One small canvas per (dot size, palette colour).
++  const sprites = [];
++  for (let step = 1; step <= 3; step++) {
++    sprites[step] = PALETTE.map((color) => {
++      const c = new OffscreenCanvas(px, px);
++      const g = c.getContext('2d');
++      g.fillStyle = color;
++      g.beginPath();
++      g.arc(px / 2, px / 2, (px / 2) * 0.9 * COVER[step], 0, Math.PI * 2);
++      g.fill();
++      return c;
++    });
++  }
++  return sprites;
++}
++
++function resize() {
++  const dpr = window.devicePixelRatio || 1;
++  const w = window.innerWidth, h = window.innerHeight;
++  canvas.width = Math.round(w * dpr);
++  canvas.height = Math.round(h * dpr);
++  const W = Math.ceil(w / CELL), H = Math.ceil(h / CELL);
++  const px = CELL * dpr;
++  // Center the grid on the page (the planet sits in the middle).
++  const ox = (canvas.width - W * px) / 2, oy = (canvas.height - H * px) / 2;
++  grid = { W, H, px, ox, oy, frame: makePlanet(W, H), sprites: buildSprites(Math.ceil(px)) };
++  draw();
++}
++
++function draw() {
++  if (!grid) return;
++  const { W, H, px, ox, oy, frame, sprites } = grid;
++  const { steps, colors } = frame((performance.now() - start) / 1000);
++  ctx.clearRect(0, 0, canvas.width, canvas.height);
++  for (let r = 0; r < H; r++) {
++    const y = oy + r * px;
++    for (let x = 0; x < W; x++) {
++      const k = r * W + x;
++      const step = steps[k];
++      if (step) ctx.drawImage(sprites[step][colors[k]], ox + x * px, y);
++    }
++  }
++}
++
++let resizeTimer = 0;
++window.addEventListener('resize', () => {
++  clearTimeout(resizeTimer);
++  resizeTimer = setTimeout(resize, 120);
++});
++resize();
++let last = 0;
++function tick(now) {
++  if (now - last >= 1000 / FPS) {
++    last = now;
++    draw();
++  }
++  requestAnimationFrame(tick);
++}
++requestAnimationFrame(tick);
++
++// --- summary (placeholder until the Figma summary is in) ---
++const timeEl = document.getElementById('time');
++const dateEl = document.getElementById('date');
++function updateClock() {
++  const now = new Date();
++  timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
++  dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
++}
++updateClock();
++setInterval(updateClock, 10000);
++
++// --- search ---
++const form = document.getElementById('search');
++const input = document.getElementById('q');
++form.addEventListener('submit', (e) => {
++  e.preventDefault();
++  const text = input.value.trim();
++  if (text) chrome.send('search', [text]);
++});
++input.addEventListener('keydown', (e) => {
++  if (e.key === 'Escape') input.value = '';
++});
++input.focus();
++)SATURN";
++
++inline constexpr char kSearchSvg[] =
++    R"SATURN(<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
++<g clip-path="url(#clip0_4125_371)">
++<path d="M2.5 8.33333C2.5 9.09938 2.65088 9.85792 2.94404 10.5657C3.23719 11.2734 3.66687 11.9164 4.20854 12.4581C4.75022 12.9998 5.39328 13.4295 6.10101 13.7226C6.80875 14.0158 7.56729 14.1667 8.33333 14.1667C9.09938 14.1667 9.85792 14.0158 10.5657 13.7226C11.2734 13.4295 11.9164 12.9998 12.4581 12.4581C12.9998 11.9164 13.4295 11.2734 13.7226 10.5657C14.0158 9.85792 14.1667 9.09938 14.1667 8.33333C14.1667 7.56729 14.0158 6.80875 13.7226 6.10101C13.4295 5.39328 12.9998 4.75022 12.4581 4.20854C11.9164 3.66687 11.2734 3.23719 10.5657 2.94404C9.85792 2.65088 9.09938 2.5 8.33333 2.5C7.56729 2.5 6.80875 2.65088 6.10101 2.94404C5.39328 3.23719 4.75022 3.66687 4.20854 4.20854C3.66687 4.75022 3.23719 5.39328 2.94404 6.10101C2.65088 6.80875 2.5 7.56729 2.5 8.33333Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="white"/>
++<path d="M17.5 17.5L12.5 12.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="white"/>
++</g>
++<defs>
++<clipPath id="clip0_4125_371">
++<rect width="20" height="20" fill="white"/>
++</clipPath>
++</defs>
++</svg>
++)SATURN";
++
++}  // namespace saturn_start
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_PAGE_H_
+diff --git a/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc
+new file mode 100644
+index 0000000..19d78a5
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc
+@@ -0,0 +1,180 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/saturn_start/saturn_start_ui.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++
++#include "base/base_paths.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "base/path_service.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "base/values.h"
++#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/webui/saturn_start/saturn_start_page.h"
++#include "components/omnibox/browser/autocomplete_classifier.h"
++#include "components/omnibox/browser/autocomplete_match.h"
++#include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "content/public/browser/web_ui_message_handler.h"
++#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "third_party/skia/include/core/SkColor.h"
++
++namespace {
++
++std::optional<std::string_view> StaticFile(const std::string& path) {
++  if (path.empty() || path == "start.html") {
++    return saturn_start::kHtml;
++  }
++  if (path == "start.css") {
++    return saturn_start::kCss;
++  }
++  if (path == "start.js") {
++    return saturn_start::kJs;
++  }
++  if (path == "search.svg") {
++    return saturn_start::kSearchSvg;
++  }
++  return std::nullopt;
++}
++
++bool IsFont(const std::string& path) {
++  return path == "Inter-Regular.ttf" || path == "Inter-Medium.ttf";
++}
++
++bool ShouldHandle(const std::string& path) {
++  return StaticFile(path).has_value() || IsFont(path);
++}
++
++void Handle(const std::string& path,
++            content::WebUIDataSource::GotDataCallback callback) {
++  if (std::optional<std::string_view> file = StaticFile(path)) {
++    std::move(callback).Run(
++        base::MakeRefCounted<base::RefCountedString>(std::string(*file)));
++    return;
++  }
++  // The fonts ship next to the browser (see gfx::InitializeFonts()).
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(
++          [](std::string name) {
++            std::string data;
++            base::FilePath dir;
++            if (base::PathService::Get(base::DIR_MODULE, &dir)) {
++              base::ReadFileToString(
++                  dir.AppendASCII("saturn_fonts").AppendASCII(name), &data);
++            }
++            return data;
++          },
++          path),
++      base::BindOnce(
++          [](content::WebUIDataSource::GotDataCallback callback,
++             std::string data) {
++            std::move(callback).Run(
++                base::MakeRefCounted<base::RefCountedString>(std::move(data)));
++          },
++          std::move(callback)));
++}
++
++// "search": opens what was typed (a URL, or a search) in a new tab of the
++// window's space, then closes the start page.
++class SaturnStartHandler : public content::WebUIMessageHandler {
++ public:
++  SaturnStartHandler() = default;
++  SaturnStartHandler(const SaturnStartHandler&) = delete;
++  SaturnStartHandler& operator=(const SaturnStartHandler&) = delete;
++  ~SaturnStartHandler() override = default;
++
++  // content::WebUIMessageHandler:
++  void RegisterMessages() override {
++    web_ui()->RegisterMessageCallback(
++        "search", base::BindRepeating(&SaturnStartHandler::HandleSearch,
++                                      base::Unretained(this)));
++  }
++
++ private:
++  void HandleSearch(const base::ListValue& args) {
++    if (args.empty() || !args[0].is_string()) {
++      return;
++    }
++    std::u16string text;
++    base::TrimWhitespace(base::UTF8ToUTF16(args[0].GetString()),
++                         base::TRIM_ALL, &text);
++    content::WebContents* const contents = web_ui()->GetWebContents();
++    tabs::TabInterface* const tab =
++        tabs::TabInterface::MaybeGetFromContents(contents);
++    BrowserWindowInterface* const browser =
++        tab ? tab->GetBrowserWindowInterface() : nullptr;
++    if (text.empty() || !browser) {
++      return;
++    }
++    AutocompleteMatch match;
++    AutocompleteClassifierFactory::GetForProfile(
++        Profile::FromWebUI(web_ui()))
++        ->Classify(text, /*in_keyword_mode=*/false,
++                   /*allow_exact_keyword_match=*/false,
++                   metrics::OmniboxEventProto::OTHER, &match, nullptr);
++    if (!match.destination_url.is_valid()) {
++      return;
++    }
++    // A new tab, so it gets the space's storage partition (WebUI pages always
++    // use the default one).
++    NavigateParams params(
++        browser, match.destination_url,
++        ui::PageTransitionFromInt(match.transition |
++                                  ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
++    params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    Navigate(&params);
++    // Not from inside this page's own message.
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](base::WeakPtr<content::WebContents> contents,
++               base::WeakPtr<BrowserWindowInterface> browser) {
++              if (!contents || !browser) {
++                return;
++              }
++              TabStripModel* const model = browser->GetTabStripModel();
++              const int index = model->GetIndexOfWebContents(contents.get());
++              if (index != TabStripModel::kNoTab && model->count() > 1) {
++                model->CloseWebContentsAt(index, TabCloseTypes::CLOSE_NONE);
++              }
++            },
++            contents->GetWeakPtr(), browser->GetWeakPtr()));
++  }
++};
++
++}  // namespace
++
++SaturnStartUI::SaturnStartUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  content::WebUIDataSource* const source =
++      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
++                                             kSaturnStartHost);
++  source->SetRequestFilter(base::BindRepeating(&ShouldHandle),
++                           base::BindRepeating(&Handle));
++  web_ui->AddMessageHandler(std::make_unique<SaturnStartHandler>());
++  // See-through: the window's acrylic shows behind the page's 50% black.
++  web_ui->GetWebContents()->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
++}
++
++SaturnStartUI::~SaturnStartUI() {
++  web_ui()->GetWebContents()->SetPageBaseBackgroundColor(std::nullopt);
++}
+diff --git a/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h
+new file mode 100644
+index 0000000..7977d5e
+--- /dev/null
++++ b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h
+@@ -0,0 +1,34 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_UI_H_
++
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++
++class SaturnStartUI;
++
++inline constexpr char kSaturnStartHost[] = "start";
++inline constexpr char kSaturnStartURL[] = "chrome://start/";
++
++class SaturnStartUIConfig : public content::DefaultWebUIConfig<SaturnStartUI> {
++ public:
++  SaturnStartUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme, kSaturnStartHost) {}
++};
++
++// Saturn: the start page (saturn://start). Shown at launch, for new tabs and
++// when the last tab closes: a see-through page with a search box over an
++// animated dot-art planet. The page itself lives in saturn_start_page.h.
++class SaturnStartUI : public content::WebUIController {
++ public:
++  explicit SaturnStartUI(content::WebUI* web_ui);
++  SaturnStartUI(const SaturnStartUI&) = delete;
++  SaturnStartUI& operator=(const SaturnStartUI&) = delete;
++  ~SaturnStartUI() override;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_UI_H_
+-- 
+2.56.0.windows.4
+

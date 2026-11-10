@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From a5cd680358e28ae53a7792da0709c2c13f1b8b9f Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Mon, 9 Nov 2026 11:42:49 +0500
-Subject: [PATCH 04/11] Saturn: Arc-style sidebar layout (phase 1)
+Subject: [PATCH 04/12] Saturn: Arc-style sidebar layout (phase 1)
 
 Vertical tabs on by default; toolbar (nav buttons, URL pill, sliders menu,
 sidebar toggle) moves into the 258px sidebar; 25px Saturn title bar; page
@@ -748,3 +748,6 @@ index e10dc91..f8e43d3 100644
    // Subscription for when contextual tasks button position should update.
    base::CallbackListSubscription
        contextual_tasks_button_position_subscription_;
+-- 
+2.56.0.windows.4
+

@@ -178,6 +178,22 @@ Commit `saturn_dev` afterwards.
    (default browser prompt, unsupported flags), no separator or shadow box
    above the page. Sidebar at least 210px, text 14px, divider 15%, settings
    button uses the Saturn logo (`saturn_logo.icon`).
+12. **0012 start page, Saturn menu** – `saturn://start`
+   (`chrome/browser/ui/webui/saturn_start/`) is shown at launch, for new tabs
+   (`chrome://newtab` is rewritten to it) and when the last tab closes: a
+   see-through page (50% black over the window's acrylic; `ContentsWebView`
+   drops its background for it) with a search box and the animated dot-art
+   planet. Its files are in `resources/`; after editing them run
+   `python saturn/scripts/gen_start_page.py`, which packs them into
+   `saturn_start_page.h`. Search opens a new tab (so own-cookie spaces keep
+   their partition) and closes the start page. `saturn::ShowMenu()`
+   (`frame/saturn_menu.cc`) is the Saturn menu: 196px, acrylic + 60% #161616,
+   30px rows with 20px icons (`saturn_menu_*.icon`), dividers, 30% disabled
+   rows and submenus; it never takes activation. The Pinned list uses it:
+   Copy Link, Rename Tab (custom name in the store), Mute/Unmute, Edit Pinned
+   page (update to current URL / edit URL prompt via
+   `ShowSaturnTextPrompt`), Duplicate, Move to (another space), Remove Pin.
+   Dragging a tab shows the favourites' empty slot right away.
 
 ## Monthly update (release build)
 
