@@ -140,7 +140,7 @@ Commit `saturn_dev` afterwards.
    `ui/gfx/font_render_params_win.cc` (browser UI, GPU, renderer prefs) and
    blink's `win/font_platform_data_win.cc` (web pages); ignores the system
    ClearType settings.
-9. **0009 sidebar polish** – sidebar text is Inter Medium 13px; 5px between
+9. **0009 sidebar polish** – sidebar text is Inter Medium 13px (14px since 0011); 5px between
    tabs; rows get white 5% on hover (active row 20%); the close button (Figma
    glyph, `saturn_close_tab.icon`) shows only on the hovered row, 5px from its
    right edge. The space name is gone; the divider and Clear show only while
@@ -168,6 +168,16 @@ Commit `saturn_dev` afterwards.
    the stop animation, lighter URL pill on hover, 8px under the pill, divider
    always visible (shortens when Clear shows). Pinned tabs and the bookmark
    Pinned folder are imported once.
+11. **0011 square hovers, sound toggle, scrollbars** – every small icon button
+   (toolbar, tab close, item close/remove, settings, +, sound) hovers with the
+   copy button's rounded square, white 5% (`saturn::PaintSquareHover`), never
+   a round ink drop; New tab gets the white 5% row hover. Tabs playing sound
+   show a mute toggle (`saturn_sound_on/off.icon`, off is 50% in the icon) 7px
+   after the favicon. Web scrollbars are overlay: a 5px white 60% line, no
+   track or arrows (`ui/native_theme`). No bookmarks bar, no startup infobars
+   (default browser prompt, unsupported flags), no separator or shadow box
+   above the page. Sidebar at least 210px, text 14px, divider 15%, settings
+   button uses the Saturn logo (`saturn_logo.icon`).
 
 ## Monthly update (release build)
 

@@ -1,0 +1,773 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Tue, 10 Nov 2026 15:48:29 +0500
+Subject: [PATCH 11/11] Saturn: square hovers, sound toggle, Arc-style
+ scrollbars, no bookmarks bar or startup infobars
+
+Every small icon button hovers with the copy button's rounded square (no ink
+drops); New tab gets the white 5% row hover; the sound toggle (sound on/off
+icons) sits 7px after the favicon; web scrollbars are overlay, a 5px white 60%
+line; no bookmarks bar, startup infobars or separator above the page; sidebar
+at least 210px wide, 14px text, 15% divider, Saturn logo for settings.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chrome/app/vector_icons/BUILD.gn              |  3 +
+ chrome/app/vector_icons/saturn_logo.icon      | 21 +++++++
+ chrome/app/vector_icons/saturn_sound_off.icon | 39 +++++++++++++
+ chrome/app/vector_icons/saturn_sound_on.icon  | 41 ++++++++++++++
+ .../ui/bookmarks/bookmark_bar_controller.cc   |  4 ++
+ chrome/browser/ui/startup/infobar_utils.cc    |  5 ++
+ .../ui/tabs/vertical_tab_strip_state.h        |  3 +-
+ .../layout/browser_view_tabbed_layout_impl.cc | 18 ++++--
+ .../ui/views/frame/saturn_sidebar_constants.h | 16 +++++-
+ .../frame/vertical_tab_strip_region_view.cc   | 55 ++++++++++++++++---
+ .../tabs/common/tab_view_vertical_layout.cc   | 29 ++++++++++
+ .../views/tabs/tab/alert_indicator_button.cc  | 30 +++++++++-
+ .../views/tabs/tab/alert_indicator_button.h   |  1 +
+ .../ui/views/tabs/tab/tab_close_button.cc     | 11 +++-
+ .../ui/views/tabs/tab/tab_close_button.h      |  1 +
+ .../views/toolbar/browser_app_menu_button.cc  |  2 +-
+ .../ui/views/toolbar/toolbar_button.cc        | 17 ++++--
+ .../browser/ui/views/toolbar/toolbar_button.h |  1 +
+ .../features/native_theme_features.cc         |  6 +-
+ ui/native_theme/native_theme_fluent.cc        | 19 ++++++-
+ ui/native_theme/overlay_scrollbar_constants.h |  3 +-
+ 21 files changed, 296 insertions(+), 29 deletions(-)
+ create mode 100644 chrome/app/vector_icons/saturn_logo.icon
+ create mode 100644 chrome/app/vector_icons/saturn_sound_off.icon
+ create mode 100644 chrome/app/vector_icons/saturn_sound_on.icon
+
+diff --git a/chrome/app/vector_icons/BUILD.gn b/chrome/app/vector_icons/BUILD.gn
+index fdb353b..df4b599 100644
+--- a/chrome/app/vector_icons/BUILD.gn
++++ b/chrome/app/vector_icons/BUILD.gn
+@@ -115,6 +115,9 @@ aggregate_vector_icons("chrome_vector_icons") {
+     "dock_to_left.icon",
+     "saturn_back.icon",
+     "saturn_clear.icon",
++    "saturn_logo.icon",
++    "saturn_sound_off.icon",
++    "saturn_sound_on.icon",
+     "saturn_close_tab.icon",
+     "saturn_remove_tab.icon",
+     "saturn_forward.icon",
+diff --git a/chrome/app/vector_icons/saturn_logo.icon b/chrome/app/vector_icons/saturn_logo.icon
+new file mode 100644
+index 0000000..2bedff7
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_logo.icon
+@@ -0,0 +1,21 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 5.8683f, 5.8822f,
++CUBIC_TO, 4.7933f, 6.9808f, 4.1954f, 8.4593f, 4.2044f, 9.9963f,
++CUBIC_TO, 4.2135f, 11.5333f, 4.8288f, 13.0046f, 5.9166f, 14.0905f,
++CUBIC_TO, 7.0045f, 15.1763f, 8.4769f, 15.789f, 10.0139f, 15.7952f,
++CUBIC_TO, 11.551f, 15.8015f, 13.0283f, 15.2009f, 14.125f, 14.1239f,
++MOVE_TO, 15.4425f, 12.1031f,
++CUBIC_TO, 15.8506f, 11.0486f, 15.9435f, 9.8983f, 15.7099f, 8.7921f,
++CUBIC_TO, 15.4763f, 7.6858f, 14.9262f, 6.6713f, 14.1265f, 5.8719f,
++CUBIC_TO, 13.3269f, 5.0726f, 12.3122f, 4.5228f, 11.2059f, 4.2896f,
++CUBIC_TO, 10.0995f, 4.0563f, 8.9493f, 4.1496f, 7.895f, 4.5581f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 2.5f, 2.5f,
++LINE_TO, 17.5f, 17.5f,
+diff --git a/chrome/app/vector_icons/saturn_sound_off.icon b/chrome/app/vector_icons/saturn_sound_off.icon
+new file mode 100644
+index 0000000..36c1cf1
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_sound_off.icon
+@@ -0,0 +1,39 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++PATH_COLOR_ALPHA, 0x80,
++STROKE, 1.5f,
++MOVE_TO, 5, 12.5002f,
++H_LINE_TO, 3.3333f,
++CUBIC_TO, 3.1123f, 12.5002f, 2.9004f, 12.4124f, 2.7441f, 12.2561f,
++CUBIC_TO, 2.5878f, 12.0998f, 2.5f, 11.8879f, 2.5f, 11.6668f,
++V_LINE_TO, 8.3335f,
++CUBIC_TO, 2.5f, 8.1125f, 2.5878f, 7.9005f, 2.7441f, 7.7443f,
++CUBIC_TO, 2.9004f, 7.588f, 3.1123f, 7.5002f, 3.3333f, 7.5002f,
++H_LINE_TO, 5,
++LINE_TO, 7.9167f, 3.7502f,
++CUBIC_TO, 7.9895f, 3.6087f, 8.1105f, 3.4979f, 8.2579f, 3.4379f,
++CUBIC_TO, 8.4053f, 3.3779f, 8.5693f, 3.3726f, 8.7202f, 3.4229f,
++CUBIC_TO, 8.8712f, 3.4732f, 8.9992f, 3.5759f, 9.081f, 3.7123f,
++CUBIC_TO, 9.1629f, 3.8487f, 9.1933f, 4.01f, 9.1667f, 4.1669f,
++V_LINE_TO, 15.8335f,
++CUBIC_TO, 9.1933f, 15.9904f, 9.1629f, 16.1516f, 9.081f, 16.2881f,
++CUBIC_TO, 8.9992f, 16.4245f, 8.8712f, 16.5272f, 8.7202f, 16.5775f,
++CUBIC_TO, 8.5693f, 16.6278f, 8.4053f, 16.6225f, 8.2579f, 16.5624f,
++CUBIC_TO, 8.1105f, 16.5024f, 7.9895f, 16.3917f, 7.9167f, 16.2502f,
++LINE_TO, 5, 12.5002f,
++CLOSE,
++NEW_PATH,
++PATH_COLOR_ALPHA, 0x80,
++STROKE, 1.5f,
++MOVE_TO, 13.3333f, 8.334f,
++LINE_TO, 15, 10.0007f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 16.6666f, 11.6673f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 16.6666f, 8.334f,
++MOVE_TO, 15, 10.0007f,
++LINE_TO, 13.3333f, 11.6673f,
+diff --git a/chrome/app/vector_icons/saturn_sound_on.icon b/chrome/app/vector_icons/saturn_sound_on.icon
+new file mode 100644
+index 0000000..5a92fd5
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_sound_on.icon
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 12.5f, 6.666f,
++CUBIC_TO, 13.0175f, 7.0541f, 13.4375f, 7.5574f, 13.7268f, 8.136f,
++CUBIC_TO, 14.0161f, 8.7145f, 14.1667f, 9.3525f, 14.1667f, 9.9993f,
++CUBIC_TO, 14.1667f, 10.6462f, 14.0161f, 11.2842f, 13.7268f, 11.8627f,
++CUBIC_TO, 13.4375f, 12.4413f, 13.0175f, 12.9446f, 12.5f, 13.3327f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 14.75f, 4.166f,
++CUBIC_TO, 15.62f, 4.8691f, 16.3217f, 5.7578f, 16.8037f, 6.7671f,
++CUBIC_TO, 17.2858f, 7.7764f, 17.536f, 8.8808f, 17.536f, 9.9993f,
++CUBIC_TO, 17.536f, 11.1179f, 17.2858f, 12.2223f, 16.8037f, 13.2316f,
++CUBIC_TO, 16.3217f, 14.2409f, 15.62f, 15.1296f, 14.75f, 15.8327f,
++NEW_PATH,
++STROKE, 1.5f,
++MOVE_TO, 5, 12.5002f,
++H_LINE_TO, 3.3333f,
++CUBIC_TO, 3.1123f, 12.5002f, 2.9004f, 12.4124f, 2.7441f, 12.2561f,
++CUBIC_TO, 2.5878f, 12.0998f, 2.5f, 11.8879f, 2.5f, 11.6668f,
++V_LINE_TO, 8.3335f,
++CUBIC_TO, 2.5f, 8.1125f, 2.5878f, 7.9005f, 2.7441f, 7.7443f,
++CUBIC_TO, 2.9004f, 7.588f, 3.1123f, 7.5002f, 3.3333f, 7.5002f,
++H_LINE_TO, 5,
++LINE_TO, 7.9167f, 3.7502f,
++CUBIC_TO, 7.9895f, 3.6087f, 8.1105f, 3.4979f, 8.2579f, 3.4379f,
++CUBIC_TO, 8.4053f, 3.3779f, 8.5693f, 3.3726f, 8.7202f, 3.4229f,
++CUBIC_TO, 8.8712f, 3.4732f, 8.9992f, 3.5759f, 9.081f, 3.7123f,
++CUBIC_TO, 9.1629f, 3.8487f, 9.1933f, 4.01f, 9.1667f, 4.1669f,
++V_LINE_TO, 15.8335f,
++CUBIC_TO, 9.1933f, 15.9904f, 9.1629f, 16.1516f, 9.081f, 16.2881f,
++CUBIC_TO, 8.9992f, 16.4245f, 8.8712f, 16.5272f, 8.7202f, 16.5775f,
++CUBIC_TO, 8.5693f, 16.6278f, 8.4053f, 16.6225f, 8.2579f, 16.5624f,
++CUBIC_TO, 8.1105f, 16.5024f, 7.9895f, 16.3917f, 7.9167f, 16.2502f,
++LINE_TO, 5, 12.5002f,
++CLOSE,
+diff --git a/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc b/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
+index 00e8c6b..55f0273 100644
+--- a/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
++++ b/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
+@@ -222,6 +222,10 @@ void BookmarkBarController::OnSplitTabChanged(const SplitTabChange& change) {
+ }
+ 
+ bool BookmarkBarController::ShouldShowBookmarkBar() const {
++  // Saturn: no bookmarks bar (favorites live in the sidebar).
++  if ((true)) {
++    return false;
++  }
+   if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("bookmark-bar-ntp") == "never") {
+     return false;
+   }
+diff --git a/chrome/browser/ui/startup/infobar_utils.cc b/chrome/browser/ui/startup/infobar_utils.cc
+index 8167c5a..90d7486 100644
+--- a/chrome/browser/ui/startup/infobar_utils.cc
++++ b/chrome/browser/ui/startup/infobar_utils.cc
+@@ -163,6 +163,11 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
+                             bool is_web_app,
+                             bool is_post_crash_launch,
+                             bool was_restarted) {
++  // Saturn: no startup infobars (default browser prompt, unsupported flags,
++  // ...).
++  if ((true)) {
++    return;
++  }
+   if (!browser || !profile) {
+     return;
+   }
+diff --git a/chrome/browser/ui/tabs/vertical_tab_strip_state.h b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+index 6e0b2bb..486c16f 100644
+--- a/chrome/browser/ui/tabs/vertical_tab_strip_state.h
++++ b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+@@ -11,7 +11,8 @@ namespace tabs {
+ inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 258;
+ // TODO(crbug.com/465833741): Replace constant with derived value based on
+ // caption buttons.
+-inline constexpr int kVerticalTabStripUncollapsedMinWidth = 126;
++// Saturn: the sidebar is at least 210px wide.
++inline constexpr int kVerticalTabStripUncollapsedMinWidth = 210;
+ // TODO(crbug.com/465832180): Replace constant based width final max width for
+ // view.
+ inline constexpr int kVerticalTabStripUncollapsedMaxWidth = 400;
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index 135100b..36d7670 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -1205,7 +1205,10 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+   }
+ 
+   gfx::Insets shadow_overlay_insets;
+-  if (layout_data_->separator_info.shadow_box) {
++  // Saturn: no shadow box (its 1px top inset showed as a line above the page).
++  const bool saturn_shadow_box =
++      layout_data_->separator_info.shadow_box && !layout_data_->saturn_sidebar;
++  if (saturn_shadow_box) {
+     // As the side panel animates in, the main panel shrinks and moves over to
+     // accommodate the panel.
+     const int scaled_main_area_padding = base::ClampRound(
+@@ -1226,7 +1229,7 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+ 
+   // Lay out the shadow overlay.
+   layout.AddChild(views().main_shadow_overlay, params.visual_client_area,
+-                  layout_data_->separator_info.shadow_box);
++                  saturn_shadow_box);
+ 
+   // Lay out top container. The top container is laid out after the
+   // toolbar-height side panel with a horizontal tabstrip if the browser is wide
+@@ -1535,7 +1538,9 @@ gfx::Rect BrowserViewTabbedLayoutImpl::CalculateTopContainerLayout(
+   // Maybe show the separator in the top container.
+   if (IsParentedTo(views().top_container_separator, views().top_container)) {
+     gfx::Rect separator_bounds;
+-    if (layout_data_->separator_info.top_container_separator) {
++    // Saturn: no line above the page.
++    if (layout_data_->separator_info.top_container_separator &&
++        !layout_data_->saturn_sidebar) {
+       separator_bounds = gfx::Rect(
+           params.visual_client_area.x(), params.visual_client_area.y(),
+           params.visual_client_area.width(),
+@@ -1543,7 +1548,8 @@ gfx::Rect BrowserViewTabbedLayoutImpl::CalculateTopContainerLayout(
+       params.SetTop(separator_bounds.bottom());
+     }
+     layout.AddChild(views().top_container_separator, separator_bounds,
+-                    layout_data_->separator_info.top_container_separator);
++                    layout_data_->separator_info.top_container_separator &&
++                        !layout_data_->saturn_sidebar);
+   }
+ 
+   return gfx::Rect(params.visual_client_area.x(), original_top,
+@@ -1643,6 +1649,10 @@ void BrowserViewTabbedLayoutImpl::DoPreLayoutComputations(
+       !delegate().IsVerticalTabStripCollapsed() &&
+       delegate().IsToolbarVisible() &&
+       IsParentedTo(views().top_container, views().browser_view);
++  // Saturn: the page is a card; no separators or shadow box around it.
++  if (layout_data_->saturn_sidebar) {
++    layout_data_->separator_info = SeparatorInfo();
++  }
+ }
+ 
+ void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+index 1e26378..cc2c34b 100644
+--- a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -5,7 +5,10 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_SIDEBAR_CONSTANTS_H_
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_SATURN_SIDEBAR_CONSTANTS_H_
+ 
++#include "cc/paint/paint_flags.h"
+ #include "third_party/skia/include/core/SkColor.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/geometry/rect.h"
+ #include "ui/gfx/font.h"
+ #include "ui/gfx/font_list.h"
+ 
+@@ -80,8 +83,19 @@ inline constexpr SkColor kUrlPillColor = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
+ 
+ // Fonts from the design (bundled, see gfx::InitializeFonts()): sidebar rows
+ // are Inter Medium 13px; the title bar and space name JetBrains Mono 12px.
++// Every small icon button hovers with the same rounded square as the URL
++// pill's copy button (no circular ink drops): white 5% over the whole button.
++inline constexpr SkColor kHoverColor = SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF);
++inline constexpr int kHoverRadius = 8;
++inline void PaintSquareHover(gfx::Canvas* canvas, const gfx::Rect& rect) {
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setColor(kHoverColor);
++  canvas->DrawRoundRect(rect, kHoverRadius, flags);
++}
++
+ inline gfx::FontList SidebarFont() {
+-  return gfx::FontList({"Inter"}, gfx::Font::NORMAL, 13,
++  return gfx::FontList({"Inter"}, gfx::Font::NORMAL, 14,
+                        gfx::Font::Weight::MEDIUM);
+ }
+ inline gfx::FontList MonoFont() {
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index be947d0..f897d41 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -185,6 +185,24 @@ std::map<GURL, gfx::ImageSkia>& SaturnFaviconCache() {
+   return *cache;
+ }
+ 
++// Saturn: small icon button with the shared square hover (no ink drop).
++class SaturnHoverButton : public views::ImageButton {
++  METADATA_HEADER(SaturnHoverButton, views::ImageButton)
++
++ public:
++  using views::ImageButton::ImageButton;
++
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    views::ImageButton::OnPaintBackground(canvas);
++    if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
++      saturn::PaintSquareHover(canvas, GetLocalBounds());
++    }
++  }
++};
++
++BEGIN_METADATA(SaturnHoverButton)
++END_METADATA
++
+ class SaturnItemView : public views::Button,
+                        public views::ContextMenuController,
+                        public ui::SimpleMenuModel::Delegate {
+@@ -213,7 +231,7 @@ class SaturnItemView : public views::Button,
+       title_->SetElideBehavior(gfx::ELIDE_TAIL);
+       title_->SetCanProcessEventsWithinSubtree(false);
+ 
+-      action_ = AddChildView(std::make_unique<views::ImageButton>(
++      action_ = AddChildView(std::make_unique<SaturnHoverButton>(
+           base::BindRepeating(&SaturnItemView::OnActionPressed,
+                               base::Unretained(this))));
+       action_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+@@ -691,7 +709,7 @@ std::unique_ptr<views::ImageButton> SaturnBarButton(
+     views::Button::PressedCallback callback,
+     const gfx::VectorIcon& icon,
+     const std::u16string& tooltip) {
+-  auto button = std::make_unique<views::ImageButton>(std::move(callback));
++  auto button = std::make_unique<SaturnHoverButton>(std::move(callback));
+   button->SetImageModel(views::Button::STATE_NORMAL,
+                         ui::ImageModel::FromVectorIcon(icon, SK_ColorWHITE, 20));
+   button->SetBackground(views::CreateRoundedRectBackground(
+@@ -700,11 +718,6 @@ std::unique_ptr<views::ImageButton> SaturnBarButton(
+   button->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+   button->SetTooltipText(tooltip);
+   button->SetAccessibleName(tooltip);
+-  views::InstallRoundRectHighlightPathGenerator(button.get(), gfx::Insets(),
+-                                                10);
+-  views::InkDrop::Get(button.get())
+-      ->SetMode(views::InkDropHost::InkDropMode::ON);
+-  views::InkDrop::Get(button.get())->SetBaseColor(SK_ColorWHITE);
+   return button;
+ }
+ 
+@@ -723,7 +736,7 @@ class SaturnSpacesBar : public views::View {
+               }
+             },
+             base::Unretained(browser_view), base::Unretained(this)),
+-        kSaturnSettingsIcon, u"Settings and more"));
++        kSaturnLogoIcon, u"Settings and more"));
+     dots_ = AddChildView(std::make_unique<SaturnSpaceDots>(browser));
+     new_space_ = AddChildView(SaturnBarButton(
+         base::BindRepeating(
+@@ -796,7 +809,8 @@ class SaturnTodayHeader : public views::View,
+         browser, saturn::ItemKind::kPinned));
+ 
+     divider_ = AddChildView(std::make_unique<views::View>());
+-    divider_->SetBackground(views::CreateSolidBackground(muted));
++    divider_->SetBackground(
++        views::CreateSolidBackground(SkColorSetARGB(0x26, 0xFF, 0xFF, 0xFF)));
+ 
+     auto clear = std::make_unique<views::LabelButton>(
+         base::BindRepeating(&SaturnClearTodayTabs, base::Unretained(browser)),
+@@ -833,6 +847,8 @@ class SaturnTodayHeader : public views::View,
+     SaturnSetLabelFont(new_tab.get());
+     new_tab_ = AddChildView(std::move(new_tab));
+     new_tab_->layer()->SetOpacity(0.4f);
++    views::InkDrop::Get(new_tab_)->SetMode(
++        views::InkDropHost::InkDropMode::OFF);
+ 
+     browser->GetTabStripModel()->AddObserver(this);
+     store_subscription_ = saturn::Store::Get().AddObserver(base::BindRepeating(
+@@ -858,6 +874,18 @@ class SaturnTodayHeader : public views::View,
+   // ui::EventObserver:
+   void OnEvent(const ui::Event& event) override { UpdateHoverChrome(); }
+ 
++  void OnPaint(gfx::Canvas* canvas) override {
++    views::View::OnPaint(canvas);
++    if (new_tab_hovered_) {
++      cc::PaintFlags flags;
++      flags.setAntiAlias(true);
++      flags.setColor(saturn::kHoverColor);
++      canvas->DrawRoundRect(
++          new_tab_->bounds(),
++          GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius), flags);
++    }
++  }
++
+   // TabStripModelObserver:
+   void OnTabStripModelChanged(
+       TabStripModel* tab_strip_model,
+@@ -1086,6 +1114,14 @@ class SaturnTodayHeader : public views::View,
+       clear_->SetVisible(inside);
+       InvalidateLayout();
+     }
++    const bool new_tab_hovered =
++        new_tab_->GetVisible() &&
++        new_tab_->GetBoundsInScreen().Contains(cursor) &&
++        window_rect.Contains(cursor);
++    if (new_tab_hovered != new_tab_hovered_) {
++      new_tab_hovered_ = new_tab_hovered;
++      SchedulePaint();
++    }
+   }
+ 
+   raw_ptr<BrowserWindowInterface> browser_;
+@@ -1098,6 +1134,7 @@ class SaturnTodayHeader : public views::View,
+   std::unique_ptr<views::EventMonitor> event_monitor_;
+   base::CallbackListSubscription store_subscription_;
+   bool switching_ = false;
++  bool new_tab_hovered_ = false;
+   std::map<std::string, tabs::TabHandle> last_active_;
+   base::WeakPtrFactory<SaturnTodayHeader> weak_factory_{this};
+ };
+diff --git a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+index d25bbe8..18c0232 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -107,6 +107,35 @@ views::ProposedLayout TabViewVerticalLayout::CalculateProposedLayout(
+       if (cl.child_view == TabView().close_button_) close = &cl;
+       if (cl.child_view == TabView().title_) title = &cl;
+     }
++    // Saturn: the sound toggle (20px glyph in a 28px target) sits 7px after
++    // the favicon; the title follows it.
++    views::ChildLayout* alert = nullptr;
++    views::ChildLayout* icon = nullptr;
++    for (auto& cl : layouts.child_layouts) {
++      if (cl.child_view == TabView().alert_indicator_) alert = &cl;
++      if (cl.child_view == TabView().icon_) icon = &cl;
++    }
++    const std::optional<tabs::TabAlert> alert_state =
++        TabView().alert_indicator_
++            ? TabView().alert_indicator_->showing_alert_state()
++            : std::nullopt;
++    if (alert && alert->visible && icon && icon->visible && title &&
++        (alert_state == tabs::TabAlert::kAudioPlaying ||
++         alert_state == tabs::TabAlert::kAudioMuting)) {
++      constexpr int kGlyph = 20;
++      constexpr int kTarget = 28;
++      constexpr int kGapAfterFavicon = 7;
++      const int icon_right = icon->bounds.x() + kIconDesignWidth;
++      const int title_gap = std::max(0, title->bounds.x() - icon_right);
++      const int title_right = std::max(title->bounds.right(),
++                                       alert->bounds.right());
++      const int glyph_x = icon_right + kGapAfterFavicon;
++      alert->bounds = gfx::Rect(glyph_x - (kTarget - kGlyph) / 2,
++                                (height - kTarget) / 2, kTarget, kTarget);
++      const int title_x = glyph_x + kGlyph + title_gap;
++      title->bounds.set_x(title_x);
++      title->bounds.set_width(std::max(0, title_right - title_x));
++    }
+     if (close && close->visible && !close->bounds.IsEmpty()) {
+       const int target = close->bounds.width();
+       const int x = width - kCloseRightGap - kCloseGlyph -
+diff --git a/chrome/browser/ui/views/tabs/tab/alert_indicator_button.cc b/chrome/browser/ui/views/tabs/tab/alert_indicator_button.cc
+index 37d8bb7..98132e1 100644
+--- a/chrome/browser/ui/views/tabs/tab/alert_indicator_button.cc
++++ b/chrome/browser/ui/views/tabs/tab/alert_indicator_button.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "chrome/browser/ui/views/tabs/tab/alert_indicator_button.h"
+ 
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++
+ #include <utility>
+ 
+ #include "base/feature_list.h"
+@@ -268,8 +271,8 @@ void AlertIndicatorButton::TransitionToAlertState(
+ void AlertIndicatorButton::UpdateEnabledForMuteToggle() {
+   const bool was_enabled = GetEnabled();
+ 
+-  bool enable = base::FeatureList::IsEnabled(media::kEnableTabMuting) &&
+-                (alert_state_ == tabs::TabAlert::kAudioPlaying ||
++  // Saturn: the sound icon is always a mute toggle.
++  bool enable = (alert_state_ == tabs::TabAlert::kAudioPlaying ||
+                  alert_state_ == tabs::TabAlert::kAudioMuting);
+ 
+   // If the tab is not the currently-active tab, make sure it is wide enough
+@@ -423,6 +426,14 @@ bool AlertIndicatorButton::IsTriggerableEvent(const ui::Event& event) {
+   return views::ImageButton::IsTriggerableEvent(event);
+ }
+ 
++void AlertIndicatorButton::OnPaintBackground(gfx::Canvas* canvas) {
++  views::ImageButton::OnPaintBackground(canvas);
++  if (GetEnabled() &&
++      (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED)) {
++    saturn::PaintSquareHover(canvas, GetLocalBounds());
++  }
++}
++
+ void AlertIndicatorButton::PaintButtonContents(gfx::Canvas* canvas) {
+   double opaqueness = 1.0;
+   if (fade_animation_) {
+@@ -518,6 +529,21 @@ void AlertIndicatorButton::UpdateIconForAlertState(tabs::TabAlert state) {
+           ? tabs::GetAlertIndicatorColor(state, delegate_->IsApparentlyActive(),
+                                          GetWidget()->ShouldPaintAsActive())
+           : gfx::kPlaceholderColor;
++  if (state == tabs::TabAlert::kAudioPlaying ||
++      state == tabs::TabAlert::kAudioMuting) {
++    // Saturn: sound on / sound off (the off icon is 50% by design).
++    const ui::ImageModel sound = ui::ImageModel::FromVectorIcon(
++        state == tabs::TabAlert::kAudioPlaying ? kSaturnSoundOnIcon
++                                               : kSaturnSoundOffIcon,
++        SK_ColorWHITE, 20);
++    SetImageModel(views::Button::STATE_NORMAL, sound);
++    SetImageModel(views::Button::STATE_DISABLED, sound);
++    SetImageModel(views::Button::STATE_PRESSED, sound);
++    SetImageModel(views::Button::STATE_HOVERED, sound);
++    SetImageHorizontalAlignment(ALIGN_CENTER);
++    SetImageVerticalAlignment(ALIGN_MIDDLE);
++    return;
++  }
+   const ui::ImageModel indicator_image = tabs::GetAlertImageModel(state, color);
+ 
+   SetImageModel(views::Button::STATE_NORMAL, indicator_image);
+diff --git a/chrome/browser/ui/views/tabs/tab/alert_indicator_button.h b/chrome/browser/ui/views/tabs/tab/alert_indicator_button.h
+index 5d3daa6..d6a709d 100644
+--- a/chrome/browser/ui/views/tabs/tab/alert_indicator_button.h
++++ b/chrome/browser/ui/views/tabs/tab/alert_indicator_button.h
+@@ -118,6 +118,7 @@ class AlertIndicatorButton : public views::ImageButton,
+   // views::Button:
+   bool IsTriggerableEvent(const ui::Event& event) override;
+   void PaintButtonContents(gfx::Canvas* canvas) override;
++  void OnPaintBackground(gfx::Canvas* canvas) override;
+ 
+   // views::ImageButton:
+   gfx::ImageSkia GetImageToPaint() override;
+diff --git a/chrome/browser/ui/views/tabs/tab/tab_close_button.cc b/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
+index 9714c2d..689a075 100644
+--- a/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
++++ b/chrome/browser/ui/views/tabs/tab/tab_close_button.cc
+@@ -7,6 +7,7 @@
+ #include <memory>
+ 
+ #include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/views/tabs/tab.h"
+ #include "chrome/browser/ui/views/tabs/tab_slot_controller.h"
+@@ -58,7 +59,8 @@ TabCloseButton::TabCloseButton(PressedCallback pressed_callback,
+   // inkdrop state.
+   SetHasInkDropActionOnClick(true);
+ 
+-  views::InkDrop::Get(this)->SetMode(views::InkDropHost::InkDropMode::ON);
++  // Saturn: square hover (OnPaintBackground) instead of the round ink drop.
++  views::InkDrop::Get(this)->SetMode(views::InkDropHost::InkDropMode::OFF);
+   views::InkDrop::Get(this)->SetHighlightOpacity(0.16f);
+   views::InkDrop::Get(this)->SetVisibleOpacity(0.14f);
+ 
+@@ -97,6 +99,13 @@ TabCloseButton::TabCloseButton(PressedCallback pressed_callback,
+ 
+ TabCloseButton::~TabCloseButton() = default;
+ 
++void TabCloseButton::OnPaintBackground(gfx::Canvas* canvas) {
++  views::LabelButton::OnPaintBackground(canvas);
++  if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
++    saturn::PaintSquareHover(canvas, GetLocalBounds());
++  }
++}
++
+ TabStyle::TabColors TabCloseButton::GetColors() const {
+   return colors_;
+ }
+diff --git a/chrome/browser/ui/views/tabs/tab/tab_close_button.h b/chrome/browser/ui/views/tabs/tab/tab_close_button.h
+index 957cc62..bb7e7ba 100644
+--- a/chrome/browser/ui/views/tabs/tab/tab_close_button.h
++++ b/chrome/browser/ui/views/tabs/tab/tab_close_button.h
+@@ -49,6 +49,7 @@ class TabCloseButton : public views::LabelButton,
+   void AddLayerToRegion(ui::Layer* new_layer,
+                         views::LayerRegion region) override;
+   void RemoveLayerFromRegions(ui::Layer* old_layer) override;
++  void OnPaintBackground(gfx::Canvas* canvas) override;
+ 
+  protected:
+   // Set/reset the image models for the icon with new colors.
+diff --git a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+index 7874f53..e25c7e2 100644
+--- a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
++++ b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+@@ -171,7 +171,7 @@ void BrowserAppMenuButton::UpdateThemeBasedState() {
+ 
+ void BrowserAppMenuButton::UpdateIcon() {
+   // Saturn: the app menu is the sidebar's settings button.
+-  const gfx::VectorIcon& icon = kSaturnSettingsIcon;
++  const gfx::VectorIcon& icon = kSaturnLogoIcon;
+   const int icon_size = GetIconSize();
+ 
+   for (auto state : kButtonStates) {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_button.cc b/chrome/browser/ui/views/toolbar/toolbar_button.cc
+index d4c4f01..a6ffb64 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_button.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_button.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
+ 
++#include "chrome/browser/ui/views/frame/saturn_sidebar_constants.h"
++
+ #include <algorithm>
+ #include <memory>
+ #include <optional>
+@@ -116,6 +118,8 @@ ToolbarButton::ToolbarButton(PressedCallback callback,
+       highlight_color_animation_(this) {
+   ConfigureInkDrop(
+       this, std::make_unique<ToolbarButtonHighlightPathGenerator>(this));
++  // Saturn: square hover (OnPaintBackground) instead of the round ink drop.
++  views::InkDrop::Get(this)->SetMode(views::InkDropHost::InkDropMode::OFF);
+ 
+   set_context_menu_controller(this);
+ 
+@@ -414,18 +418,21 @@ const gfx::Size ToolbarButton::GetTargetSize() const {
+   return target_contents_size + target_insets.size();
+ }
+ 
++void ToolbarButton::OnPaintBackground(gfx::Canvas* canvas) {
++  views::LabelButton::OnPaintBackground(canvas);
++  if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
++    saturn::PaintSquareHover(canvas, GetLocalBounds());
++  }
++}
++
+ void ToolbarButton::StateChanged(ButtonState old_state) {
+   LabelButton::StateChanged(old_state);
+   auto* const ink_drop = views::InkDrop::Get(this);
+ 
+   if (GetState() == STATE_DISABLED) {
+     ink_drop->SetMode(views::InkDropHost::InkDropMode::OFF);
+-  } else if (old_state == STATE_DISABLED) {
+-    ink_drop->SetMode(views::InkDropHost::InkDropMode::ON);
+-    if (auto* impl = ink_drop->GetInkDrop()) {
+-      impl->SetHovered(IsMouseHovered());
+-    }
+   }
++  SchedulePaint();
+ }
+ 
+ void ToolbarButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_button.h b/chrome/browser/ui/views/toolbar/toolbar_button.h
+index 0fcdbfa..d8b1650 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_button.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_button.h
+@@ -129,6 +129,7 @@ class ToolbarButton : public views::LabelButton,
+ 
+   // views::LabelButton:
+   void StateChanged(ButtonState old_state) override;
++  void OnPaintBackground(gfx::Canvas* canvas) override;
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+   void OnThemeChanged() override;
+   gfx::Rect GetAnchorBoundsInScreen() const override;
+diff --git a/ui/native_theme/features/native_theme_features.cc b/ui/native_theme/features/native_theme_features.cc
+index 13c7661..5958069 100644
+--- a/ui/native_theme/features/native_theme_features.cc
++++ b/ui/native_theme/features/native_theme_features.cc
+@@ -21,8 +21,9 @@ constexpr base::FeatureParam<ScrollbarMode>::Option kScrollbarModeOptions[] = {
+ constexpr base::FeatureState kOverlayScrollbarFeatureState =
+     base::FEATURE_ENABLED_BY_DEFAULT;
+ #else
++// Saturn: overlay scrollbars on every platform.
+ constexpr base::FeatureState kOverlayScrollbarFeatureState =
+-    base::FEATURE_DISABLED_BY_DEFAULT;
++    base::FEATURE_ENABLED_BY_DEFAULT;
+ #endif
+ 
+ // Controls the scrollbar mode in Blink (i.e. web content) on desktop
+@@ -40,7 +41,8 @@ constexpr base::FeatureState kOverlayScrollbarFeatureState =
+ //   other platforms
+ BASE_FEATURE(kOverlayScrollbar, kOverlayScrollbarFeatureState);
+ constinit const base::FeatureParam<ScrollbarMode> kScrollbarMode{
+-    &kOverlayScrollbar, "mode", ScrollbarMode::kDevice, &kScrollbarModeOptions};
++    &kOverlayScrollbar, "mode", ScrollbarMode::kOverlay,
++    &kScrollbarModeOptions};
+ 
+ // Disable to keep scrollbars visible forever once shown, and immediately
+ // update scrollbar states instead of animating. This is used to ensure
+diff --git a/ui/native_theme/native_theme_fluent.cc b/ui/native_theme/native_theme_fluent.cc
+index b4ce2a9..303d94f 100644
+--- a/ui/native_theme/native_theme_fluent.cc
++++ b/ui/native_theme/native_theme_fluent.cc
+@@ -86,7 +86,8 @@ gfx::Size NativeThemeFluent::GetVerticalScrollbarButtonSize() const {
+ }
+ 
+ gfx::Size NativeThemeFluent::GetVerticalScrollbarThumbSize() const {
+-  return gfx::Size(9, 17);
++  // Saturn: overlay thumb is a 5px line.
++  return gfx::Size(use_overlay_scrollbar() ? 5 : 9, 17);
+ }
+ 
+ gfx::RectF NativeThemeFluent::GetArrowRect(const gfx::Rect& rect,
+@@ -170,6 +171,10 @@ void NativeThemeFluent::PaintArrowButton(
+     bool dark_mode,
+     PreferredContrast contrast,
+     const ScrollbarArrowExtraParams& extra_params) const {
++  // Saturn: overlay scrollbars are just the thumb.
++  if (use_overlay_scrollbar()) {
++    return;
++  }
+   const auto paint_button = [this, canvas, part](const gfx::RectF& paint_rect,
+                                                  cc::PaintFlags paint_flags) {
+     if (!use_overlay_scrollbar()) {
+@@ -270,7 +275,11 @@ void NativeThemeFluent::PaintScrollbarThumb(
+     const ScrollbarThumbExtraParams& extra_params) const {
+   cc::PaintFlags flags;
+   flags.setAntiAlias(true);
+-  flags.setColor(GetScrollbarThumbColor(color_provider, state, extra_params));
++  // Saturn: white 60%, in every state.
++  flags.setColor(use_overlay_scrollbar() && !extra_params.is_web_test
++                     ? SkColorSetARGB(0x99, 0xFF, 0xFF, 0xFF)
++                     : GetScrollbarThumbColor(color_provider, state,
++                                              extra_params));
+   const SkRect sk_rect = gfx::RectToSkRect(rect);
+   if (extra_params.is_web_test) {
+     // Web tests draw the thumb as a square to avoid trivial discrepancies due
+@@ -292,6 +301,9 @@ void NativeThemeFluent::PaintScrollbarTrack(
+     const gfx::Rect& rect,
+     bool forced_colors,
+     PreferredContrast contrast) const {
++  if (use_overlay_scrollbar()) {
++    return;
++  }
+   gfx::Rect track_fill_rect = rect;
+   // See comments in `PaintArrowButton()` re: the condition here.
+   if (forced_colors || contrast == PreferredContrast::kMore) {
+@@ -332,6 +344,9 @@ void NativeThemeFluent::PaintScrollbarCorner(
+     State state,
+     const gfx::Rect& rect,
+     const ScrollbarTrackExtraParams& extra_params) const {
++  if (use_overlay_scrollbar()) {
++    return;
++  }
+   cc::PaintFlags flags;
+   flags.setColor(extra_params.track_color.value_or(
+       color_provider->GetColor(kColorWebNativeControlScrollbarCorner)));
+diff --git a/ui/native_theme/overlay_scrollbar_constants.h b/ui/native_theme/overlay_scrollbar_constants.h
+index 3331e22..f980147 100644
+--- a/ui/native_theme/overlay_scrollbar_constants.h
++++ b/ui/native_theme/overlay_scrollbar_constants.h
+@@ -12,7 +12,8 @@ namespace ui {
+ 
+ inline constexpr int kOverlayScrollbarStrokeWidth = 1;
+ inline constexpr int kOverlayScrollbarThumbWidthPressed = 10;
+-inline constexpr float kOverlayScrollbarIdleThicknessScale = 0.4f;
++// Saturn: the thumb keeps its width (no grow-on-hover).
++inline constexpr float kOverlayScrollbarIdleThicknessScale = 1.0f;
+ 
+ COMPONENT_EXPORT(NATIVE_THEME) base::TimeDelta GetOverlayScrollbarFadeDelay();
+ COMPONENT_EXPORT(NATIVE_THEME)
