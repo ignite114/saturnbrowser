@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Tue, 10 Nov 2026 03:03:21 +0500
-Subject: [PATCH 9/9] Saturn: sidebar polish - URL pill and popup, hover-only
+Subject: [PATCH 09/10] Saturn: sidebar polish - URL pill and popup, hover-only
  close, drag to favorites
 
 13px Inter Medium everywhere; 5px between tabs; row hover white 5%;

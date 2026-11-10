@@ -154,6 +154,20 @@ Commit `saturn_dev` afterwards.
    open on a blank page. Dragging a tab over the favorites shows an outlined
    empty tile and pins it on drop; over the Pinned list it shows an outlined
    row and moves the page into the list (the tab closes; the row reopens it).
+10. **0010 Saturn store and spaces** – favourites and the Pinned list are
+   Saturn links, not pinned tabs or bookmarks, kept in
+   `<user data>/Saturn State.json` (`tabs/saturn_store.cc`), ready to sync to a
+   Saturn account later. An item's tab is hidden from today's list; closing it
+   (Ctrl+W closes at once) keeps the tile/row. Hover shows close (tab open) or
+   remove (`saturn_remove_tab.icon`, tab closed). Spaces live in the store and
+   switch inside the same window: tabs carry a space tag (saved in the session
+   as tab extra data), today's list shows the current space only. "+" opens a
+   New space popup: share cookies with the current space, or use its own
+   persistent storage partition (`saturnspace/<id>`, e.g. a second Google
+   account). No Chromium hover cards, no taskbar profile badge, X instead of
+   the stop animation, lighter URL pill on hover, 8px under the pill, divider
+   always visible (shortens when Clear shows). Pinned tabs and the bookmark
+   Pinned folder are imported once.
 
 ## Monthly update (release build)
 

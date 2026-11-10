@@ -1,0 +1,2701 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saturn <saturn@localhost>
+Date: Tue, 10 Nov 2026 13:50:23 +0500
+Subject: [PATCH 10/10] Saturn: favourites/Pinned list store, spaces in one
+ window, sidebar polish
+
+Favourites and the Pinned list are Saturn links saved in Saturn State.json
+(not pinned tabs/bookmarks); spaces switch in the same window, optionally with
+their own storage partition (cookies); no hover cards, no taskbar profile
+badge, X stop icon, lighter URL pill on hover, always-visible divider.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chrome/app/vector_icons/BUILD.gn              |    1 +
+ .../app/vector_icons/saturn_remove_tab.icon   |    9 +
+ .../browser/sessions/session_service_base.cc  |   10 +
+ .../browser/taskbar/taskbar_decorator_win.cc  |    2 +
+ chrome/browser/ui/browser_tabrestore.cc       |   28 +-
+ .../browser/ui/navigator/browser_navigator.cc |   34 +
+ chrome/browser/ui/tabs/BUILD.gn               |    2 +
+ chrome/browser/ui/tabs/saturn_store.cc        |  518 ++++++++
+ chrome/browser/ui/tabs/saturn_store.h         |  182 +++
+ chrome/browser/ui/tabs/tab_menu_model.cc      |   19 +-
+ chrome/browser/ui/tabs/tab_strip_model.cc     |   21 +-
+ .../ui/views/frame/saturn_sidebar_constants.h |    4 +-
+ .../frame/vertical_tab_strip_region_view.cc   | 1038 ++++++++++++-----
+ .../unpinned_tab_container_view_layout.cc     |   23 +
+ .../hovercard/tab_hover_card_controller.cc    |    2 +
+ .../browser/ui/views/toolbar/reload_button.cc |   14 +-
+ .../ui/views/toolbar/saturn_url_pill.cc       |  192 ++-
+ .../ui/views/toolbar/saturn_url_pill.h        |   10 +
+ .../tabs/public/tab_context_menu_command.h    |    1 +
+ 19 files changed, 1780 insertions(+), 330 deletions(-)
+ create mode 100644 chrome/app/vector_icons/saturn_remove_tab.icon
+ create mode 100644 chrome/browser/ui/tabs/saturn_store.cc
+ create mode 100644 chrome/browser/ui/tabs/saturn_store.h
+
+diff --git a/chrome/app/vector_icons/BUILD.gn b/chrome/app/vector_icons/BUILD.gn
+index d7ee91d..fdb353b 100644
+--- a/chrome/app/vector_icons/BUILD.gn
++++ b/chrome/app/vector_icons/BUILD.gn
+@@ -116,6 +116,7 @@ aggregate_vector_icons("chrome_vector_icons") {
+     "saturn_back.icon",
+     "saturn_clear.icon",
+     "saturn_close_tab.icon",
++    "saturn_remove_tab.icon",
+     "saturn_forward.icon",
+     "saturn_link.icon",
+     "saturn_new_tab.icon",
+diff --git a/chrome/app/vector_icons/saturn_remove_tab.icon b/chrome/app/vector_icons/saturn_remove_tab.icon
+new file mode 100644
+index 0000000..9b174c4
+--- /dev/null
++++ b/chrome/app/vector_icons/saturn_remove_tab.icon
+@@ -0,0 +1,9 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Generated from the Figma design by saturn/scripts/svg_to_icon.py.
++CANVAS_DIMENSIONS, 20,
++STROKE, 1.5f,
++MOVE_TO, 4.1667f, 10,
++H_LINE_TO, 15.8334f,
+diff --git a/chrome/browser/sessions/session_service_base.cc b/chrome/browser/sessions/session_service_base.cc
+index 8abe2da..3bae397 100644
+--- a/chrome/browser/sessions/session_service_base.cc
++++ b/chrome/browser/sessions/session_service_base.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/sessions/session_service_base.h"
+ 
++#include "chrome/browser/ui/tabs/saturn_store.h"
++
+ #include <stddef.h>
+ 
+ #include <memory>
+@@ -664,6 +666,14 @@ void SessionServiceBase::BuildCommandsForTab(
+       sessions::CreateSetSelectedNavigationIndexCommand(session_id,
+                                                         current_index));
+ 
++  // Saturn: keep the tab's space / favorite / Pinned list item.
++  for (const auto& [key, value] : saturn::TabTagsForSession(tab)) {
++    if (!value.empty()) {
++      command_storage_manager()->AppendRebuildCommand(
++          sessions::CreateAddTabExtraDataCommand(session_id, key, value));
++    }
++  }
++
+   if (index_in_window != -1) {
+     command_storage_manager()->AppendRebuildCommand(
+         sessions::CreateSetTabIndexInWindowCommand(session_id,
+diff --git a/chrome/browser/taskbar/taskbar_decorator_win.cc b/chrome/browser/taskbar/taskbar_decorator_win.cc
+index 90969f7..caf79d7 100644
+--- a/chrome/browser/taskbar/taskbar_decorator_win.cc
++++ b/chrome/browser/taskbar/taskbar_decorator_win.cc
+@@ -172,6 +172,8 @@ void DrawTaskbarDecorationString(gfx::NativeWindow window,
+ }
+ 
+ void DrawTaskbarDecoration(gfx::NativeWindow window, const gfx::Image* image) {
++  // Saturn: no profile badge on the taskbar icon (spaces are not profiles).
++  image = nullptr;
+   HWND hwnd = views::HWNDForNativeWindow(window);
+ 
+   // SetOverlayIcon() does nothing if the window is not visible so testing here
+diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
+index 6aca93a..8b88d10 100644
+--- a/chrome/browser/ui/browser_tabrestore.cc
++++ b/chrome/browser/ui/browser_tabrestore.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "chrome/browser/ui/browser_tabrestore.h"
+ 
++#include "chrome/browser/ui/tabs/saturn_store.h"
++#include "content/public/browser/site_instance.h"
++
+ #include <map>
+ #include <memory>
+ #include <utility>
+@@ -71,16 +74,37 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+       content::CreateMapWithDefaultSessionStorageNamespace(
+           browser->GetProfile(), session_storage_namespace);
+   WebContents::CreateParams create_params(browser->GetProfile());
++  // Saturn: tabs of a space with its own cookies go back into its storage
++  // partition (their session storage starts empty).
++  std::string saturn_partition;
++  if (auto it = extra_data.find(saturn::kSessionPartitionKey);
++      it != extra_data.end()) {
++    saturn_partition = it->second;
++  }
++  if (!saturn_partition.empty()) {
++    create_params.site_instance =
++        content::SiteInstance::CreateForFixedStoragePartition(
++            browser->GetProfile(),
++            selected_navigation >= 0 &&
++                    static_cast<size_t>(selected_navigation) <
++                        navigations.size()
++                ? navigations[selected_navigation].virtual_url()
++                : GURL(),
++            saturn::PartitionConfig(browser->GetProfile(), saturn_partition));
++  }
+   create_params.initially_hidden = initially_hidden;
+   create_params.desired_renderer_state =
+       WebContents::CreateParams::kNoRendererProcess;
+   create_params.last_active_time_ticks = last_active_time_ticks;
+   create_params.last_active_time = last_active_time;
+   std::unique_ptr<WebContents> web_contents =
+-      WebContents::CreateWithSessionStorage(create_params,
+-                                            session_storage_namespace_map);
++      saturn_partition.empty()
++          ? WebContents::CreateWithSessionStorage(create_params,
++                                                  session_storage_namespace_map)
++          : WebContents::Create(create_params);
+   apps::SetAppIdForWebContents(browser->GetProfile(), web_contents.get(),
+                                extension_app_id);
++  saturn::RestoreTabTags(web_contents.get(), extra_data);
+ 
+   glic::RestoreGlicStateFromExtraData(web_contents.get(), extra_data);
+   send_tab_to_self::SendTabToSelfActivationTracker::RestoreFromExtraData(
+diff --git a/chrome/browser/ui/navigator/browser_navigator.cc b/chrome/browser/ui/navigator/browser_navigator.cc
+index 1e98a3d..8e5f5a8 100644
+--- a/chrome/browser/ui/navigator/browser_navigator.cc
++++ b/chrome/browser/ui/navigator/browser_navigator.cc
+@@ -4,6 +4,12 @@
+ 
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ 
++#include "chrome/browser/ui/tabs/saturn_store.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/storage_partition.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/common/url_constants.h"
++
+ #include <algorithm>
+ #include <memory>
+ #include <optional>
+@@ -508,6 +514,34 @@ std::unique_ptr<content::WebContents> CreateTargetContents(
+                     : tab_util::GetSiteInstanceForNewTab(
+                           params.browser->GetProfile(), url);
+ 
++  // Saturn: a new tab in a space with its own cookies lives in that space's
++  // storage partition (so does a tab opened from one of its pages). WebUI
++  // pages always use the default partition.
++  if (!params.opener && !url.SchemeIs(content::kChromeUIScheme) &&
++      !url.SchemeIs(content::kChromeUIUntrustedScheme) &&
++      !url.SchemeIs(content::kChromeDevToolsScheme)) {
++    std::optional<content::StoragePartitionConfig> partition;
++    if (params.source_contents &&
++        !params.source_contents->GetPrimaryMainFrame()
++             ->GetStoragePartition()
++             ->GetConfig()
++             .is_default()) {
++      partition = params.source_contents->GetPrimaryMainFrame()
++                      ->GetStoragePartition()
++                      ->GetConfig();
++    } else if (const saturn::Space* space = saturn::Store::Get().FindSpace(
++                   saturn::Store::Get().SpaceForWindow(params.browser));
++               space && !space->partition.empty()) {
++      partition = saturn::PartitionConfig(params.browser->GetProfile(),
++                                          space->partition);
++    }
++    if (partition) {
++      initial_site_instance_for_new_contents =
++          content::SiteInstance::CreateForFixedStoragePartition(
++              params.browser->GetProfile(), url, *partition);
++    }
++  }
++
+   WebContents::CreateParams create_params(
+       params.browser->GetProfile(), initial_site_instance_for_new_contents);
+   create_params.main_frame_name = params.frame_name;
+diff --git a/chrome/browser/ui/tabs/BUILD.gn b/chrome/browser/ui/tabs/BUILD.gn
+index bb4b18f..8106434 100644
+--- a/chrome/browser/ui/tabs/BUILD.gn
++++ b/chrome/browser/ui/tabs/BUILD.gn
+@@ -374,6 +374,8 @@ if (!is_android) {
+     public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+ 
+     sources = [
++      "saturn_store.cc",
++      "saturn_store.h",
+       "tab_close_types_data.cc",
+       "tab_strip_model.cc",
+       "tab_strip_model_delegate.cc",
+diff --git a/chrome/browser/ui/tabs/saturn_store.cc b/chrome/browser/ui/tabs/saturn_store.cc
+new file mode 100644
+index 0000000..e426917
+--- /dev/null
++++ b/chrome/browser/ui/tabs/saturn_store.cc
+@@ -0,0 +1,518 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/tabs/saturn_store.h"
++
++#include <algorithm>
++#include <optional>
++#include <utility>
++
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/path_service.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/thread_pool.h"
++#include "base/uuid.h"
++#include "base/values.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/common/chrome_paths.h"
++#include "chrome/browser/sessions/session_service.h"
++#include "chrome/browser/sessions/session_service_factory.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++
++namespace saturn {
++
++namespace {
++
++constexpr char kTabTagKey[] = "saturn_tab_tag";
++constexpr char kSpaceTagKey[] = "saturn_space_tag";
++
++struct SpaceTag : public base::SupportsUserData::Data {
++  std::string space_id;
++};
++
++base::FilePath StateFilePath() {
++  base::FilePath dir;
++  if (!base::PathService::Get(chrome::DIR_USER_DATA, &dir)) {
++    return base::FilePath();
++  }
++  return dir.Append(FILE_PATH_LITERAL("Saturn State.json"));
++}
++
++std::string NewId() {
++  return base::Uuid::GenerateRandomV4().AsLowercaseString();
++}
++
++std::string ProfileName(BrowserWindowInterface* browser) {
++  return browser->GetProfile()
++      ->GetOriginalProfile()
++      ->GetPath()
++      .BaseName()
++      .AsUTF8Unsafe();
++}
++
++base::ListValue ItemsToList(const std::vector<Item>& items) {
++  base::ListValue list;
++  for (const Item& item : items) {
++    list.Append(base::DictValue()
++                    .Set("id", item.id)
++                    .Set("url", item.url.spec())
++                    .Set("title", item.title));
++  }
++  return list;
++}
++
++std::vector<Item> ListToItems(const base::ListValue* list) {
++  std::vector<Item> items;
++  if (!list) {
++    return items;
++  }
++  for (const base::Value& value : *list) {
++    const base::DictValue* dict = value.GetIfDict();
++    if (!dict) {
++      continue;
++    }
++    Item item;
++    if (const std::string* id = dict->FindString("id")) {
++      item.id = *id;
++    }
++    if (const std::string* url = dict->FindString("url")) {
++      item.url = GURL(*url);
++    }
++    if (const std::string* title = dict->FindString("title")) {
++      item.title = base::UTF8ToUTF16(*title);
++    }
++    if (!item.id.empty() && item.url.is_valid()) {
++      items.push_back(std::move(item));
++    }
++  }
++  return items;
++}
++
++}  // namespace
++
++Space::Space() = default;
++Space::Space(const Space&) = default;
++Space& Space::operator=(const Space&) = default;
++Space::~Space() = default;
++
++// static
++Store& Store::Get() {
++  static base::NoDestructor<Store> store;
++  return *store;
++}
++
++Store::Store() {
++  const base::FilePath path = StateFilePath();
++  if (path.empty()) {
++    OnLoaded(std::string());
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
++      base::BindOnce(
++          [](base::FilePath path) {
++            std::string json;
++            base::ReadFileToString(path, &json);
++            return json;
++          },
++          path),
++      base::BindOnce(&Store::OnLoaded, base::Unretained(this)));
++}
++
++Store::~Store() = default;
++
++void Store::OnLoaded(std::string json) {
++  std::optional<base::Value> root = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (root && root->is_dict()) {
++    if (const base::ListValue* spaces = root->GetDict().FindList("spaces")) {
++      for (const base::Value& value : *spaces) {
++        const base::DictValue* dict = value.GetIfDict();
++        if (!dict) {
++          continue;
++        }
++        Space space;
++        if (const std::string* id = dict->FindString("id")) {
++          space.id = *id;
++        }
++        if (const std::string* name = dict->FindString("name")) {
++          space.name = base::UTF8ToUTF16(*name);
++        }
++        if (const std::string* profile = dict->FindString("profile")) {
++          space.profile = *profile;
++        }
++        if (const std::string* partition = dict->FindString("partition")) {
++          space.partition = *partition;
++        }
++        space.imported = dict->FindBool("imported").value_or(false);
++        space.favorites = ListToItems(dict->FindList("favorites"));
++        space.pinned = ListToItems(dict->FindList("pinned"));
++        if (!space.id.empty()) {
++          spaces_.push_back(std::move(space));
++        }
++      }
++    }
++  }
++  if (root && root->is_dict()) {
++    if (const std::string* current = root->GetDict().FindString("current")) {
++      current_space_ = *current;
++    }
++  }
++  loaded_ = true;
++  observers_.Notify();
++}
++
++const Space* Store::FindSpace(const std::string& id) const {
++  auto it = std::ranges::find(spaces_, id, &Space::id);
++  return it == spaces_.end() ? nullptr : &*it;
++}
++
++Space* Store::MutableSpace(const std::string& id) {
++  auto it = std::ranges::find(spaces_, id, &Space::id);
++  return it == spaces_.end() ? nullptr : &*it;
++}
++
++std::string Store::SpaceForWindow(BrowserWindowInterface* browser) {
++  if (!loaded_ || !browser) {
++    return std::string();
++  }
++  const int window = browser->GetSessionID().id();
++  if (auto it = window_spaces_.find(window);
++      it != window_spaces_.end() && FindSpace(it->second)) {
++    return it->second;
++  }
++  const std::string profile = ProfileName(browser);
++  std::string id;
++  if (const Space* current = FindSpace(current_space_);
++      current && current->profile == profile) {
++    id = current->id;
++  }
++  for (const Space& space : spaces_) {
++    if (!id.empty()) {
++      break;
++    }
++    if (space.profile == profile) {
++      id = space.id;
++      break;
++    }
++  }
++  if (id.empty()) {
++    id = AddSpace(spaces_.empty() ? u"Primary" : u"Space", profile);
++  }
++  window_spaces_[window] = id;
++  return id;
++}
++
++void Store::SetSpaceForWindow(BrowserWindowInterface* browser,
++                              const std::string& space_id) {
++  if (!browser || !FindSpace(space_id)) {
++    return;
++  }
++  window_spaces_[browser->GetSessionID().id()] = space_id;
++  if (current_space_ != space_id) {
++    current_space_ = space_id;
++    Save();
++  }
++  observers_.Notify();
++}
++
++std::string Store::AddSpace(const std::u16string& name,
++                            const std::string& profile,
++                            bool own_cookies) {
++  Space space;
++  space.id = NewId();
++  space.name = name;
++  space.profile = profile;
++  if (own_cookies) {
++    // [a-z0-9] only: used as a storage partition name.
++    for (char c : space.id) {
++      if (c != '-') {
++        space.partition += c;
++      }
++    }
++  }
++  spaces_.push_back(space);
++  Changed();
++  return space.id;
++}
++
++void Store::RemoveSpace(const std::string& space_id) {
++  if (spaces_.size() <= 1) {
++    return;
++  }
++  std::erase_if(spaces_,
++                [&](const Space& space) { return space.id == space_id; });
++  std::erase_if(window_spaces_,
++                [&](const auto& entry) { return entry.second == space_id; });
++  if (current_space_ == space_id) {
++    current_space_ = spaces_.front().id;
++  }
++  Changed();
++}
++
++void Store::SetImported(const std::string& space_id) {
++  if (Space* space = MutableSpace(space_id); space && !space->imported) {
++    space->imported = true;
++    Changed();
++  }
++}
++
++std::string Store::AddItem(const std::string& space_id,
++                           ItemKind kind,
++                           const GURL& url,
++                           const std::u16string& title) {
++  Space* space = MutableSpace(space_id);
++  if (!loaded_ || !space || !url.is_valid()) {
++    return std::string();
++  }
++  std::vector<Item>& items = space->items(kind);
++  if (auto it = std::ranges::find(items, url, &Item::url); it != items.end()) {
++    return it->id;
++  }
++  Item item;
++  item.id = NewId();
++  item.url = url;
++  item.title = title.empty() ? base::UTF8ToUTF16(url.host()) : title;
++  items.push_back(item);
++  Changed();
++  return item.id;
++}
++
++void Store::RemoveItem(const std::string& space_id,
++                       ItemKind kind,
++                       const std::string& item_id) {
++  Space* space = MutableSpace(space_id);
++  if (!space) {
++    return;
++  }
++  std::vector<Item>& items = space->items(kind);
++  const size_t erased = std::erase_if(
++      items, [&](const Item& item) { return item.id == item_id; });
++  if (erased) {
++    Changed();
++  }
++}
++
++const Item* Store::FindItem(const std::string& space_id,
++                            ItemKind kind,
++                            const std::string& item_id) const {
++  const Space* space = FindSpace(space_id);
++  if (!space) {
++    return nullptr;
++  }
++  const std::vector<Item>& items = space->items(kind);
++  auto it = std::ranges::find(items, item_id, &Item::id);
++  return it == items.end() ? nullptr : &*it;
++}
++
++base::CallbackListSubscription Store::AddObserver(
++    base::RepeatingClosure callback) {
++  return observers_.Add(std::move(callback));
++}
++
++void Store::Changed() {
++  Save();
++  observers_.Notify();
++}
++
++void Store::Save() {
++  if (!loaded_) {
++    return;
++  }
++  const base::FilePath path = StateFilePath();
++  if (path.empty()) {
++    return;
++  }
++  base::ListValue spaces;
++  for (const Space& space : spaces_) {
++    spaces.Append(base::DictValue()
++                      .Set("id", space.id)
++                      .Set("name", space.name)
++                      .Set("profile", space.profile)
++                      .Set("partition", space.partition)
++                      .Set("imported", space.imported)
++                      .Set("favorites", ItemsToList(space.favorites))
++                      .Set("pinned", ItemsToList(space.pinned)));
++  }
++  base::DictValue root;
++  root.Set("version", 1);
++  root.Set("current", current_space_);
++  root.Set("spaces", std::move(spaces));
++  std::optional<std::string> json = base::WriteJsonWithOptions(
++      root, base::JSONWriter::OPTIONS_PRETTY_PRINT);
++  if (!json) {
++    return;
++  }
++  base::ThreadPool::PostTask(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++      base::BindOnce(
++          [](base::FilePath path, std::string json) {
++            base::ImportantFileWriter::WriteFileAtomically(path, json);
++          },
++          path, std::move(*json)));
++}
++
++const TabTag* GetTabTag(const content::WebContents* contents) {
++  return contents ? static_cast<const TabTag*>(
++                        contents->GetUserData(kTabTagKey))
++                  : nullptr;
++}
++
++void SetTabTag(content::WebContents* contents,
++               const std::string& space_id,
++               ItemKind kind,
++               const std::string& item_id) {
++  if (!contents) {
++    return;
++  }
++  auto tag = std::make_unique<TabTag>();
++  tag->space_id = space_id;
++  tag->kind = kind;
++  tag->item_id = item_id;
++  contents->SetUserData(kTabTagKey, std::move(tag));
++  if (GetTabSpace(contents) != space_id) {
++    auto space = std::make_unique<SpaceTag>();
++    space->space_id = space_id;
++    contents->SetUserData(kSpaceTagKey, std::move(space));
++  }
++  PersistTabTags(contents);
++  Store::Get().NotifyTabsChanged();
++}
++
++void ClearTabTag(content::WebContents* contents) {
++  if (contents) {
++    contents->RemoveUserData(kTabTagKey);
++    PersistTabTags(contents);
++    Store::Get().NotifyTabsChanged();
++  }
++}
++
++std::string GetTabSpace(const content::WebContents* contents) {
++  const auto* tag = contents ? static_cast<const SpaceTag*>(
++                                   contents->GetUserData(kSpaceTagKey))
++                             : nullptr;
++  return tag ? tag->space_id : std::string();
++}
++
++void SetTabSpace(content::WebContents* contents, const std::string& space_id) {
++  if (!contents || GetTabSpace(contents) == space_id) {
++    return;
++  }
++  auto tag = std::make_unique<SpaceTag>();
++  tag->space_id = space_id;
++  contents->SetUserData(kSpaceTagKey, std::move(tag));
++  PersistTabTags(contents);
++  Store::Get().NotifyTabsChanged();
++}
++
++content::StoragePartitionConfig PartitionConfig(Profile* profile,
++                                                const std::string& partition) {
++  return content::StoragePartitionConfig::Create(
++      profile, "saturnspace", partition, /*in_memory=*/false);
++}
++
++std::map<std::string, std::string> TabTagsForSession(
++    const content::WebContents* contents) {
++  std::map<std::string, std::string> data;
++  const std::string space_id = GetTabSpace(contents);
++  data[kSessionSpaceKey] = space_id;
++  const Space* space = Store::Get().FindSpace(space_id);
++  data[kSessionPartitionKey] = space ? space->partition : std::string();
++  const TabTag* tag = GetTabTag(contents);
++  data[kSessionItemKey] =
++      tag ? (tag->kind == ItemKind::kFavorite ? "f:" : "p:") + tag->item_id
++          : std::string();
++  return data;
++}
++
++void PersistTabTags(content::WebContents* contents) {
++  if (!contents) {
++    return;
++  }
++  SessionService* const service = SessionServiceFactory::GetForProfile(
++      Profile::FromBrowserContext(contents->GetBrowserContext()));
++  const SessionID window_id =
++      sessions::SessionTabHelper::IdForWindowContainingTab(contents);
++  const SessionID tab_id = sessions::SessionTabHelper::IdForTab(contents);
++  if (!service || !window_id.is_valid() || !tab_id.is_valid()) {
++    return;
++  }
++  for (const auto& [key, value] : TabTagsForSession(contents)) {
++    service->AddTabExtraData(window_id, tab_id, key.c_str(), value);
++  }
++}
++
++void RestoreTabTags(content::WebContents* contents,
++                    const std::map<std::string, std::string>& extra_data) {
++  auto get = [&](const char* key) {
++    auto it = extra_data.find(key);
++    return it == extra_data.end() ? std::string() : it->second;
++  };
++  const std::string space_id = get(kSessionSpaceKey);
++  if (space_id.empty()) {
++    return;
++  }
++  auto space = std::make_unique<SpaceTag>();
++  space->space_id = space_id;
++  contents->SetUserData(kSpaceTagKey, std::move(space));
++  const std::string item = get(kSessionItemKey);
++  if (item.size() > 2 && item[1] == ':') {
++    auto tag = std::make_unique<TabTag>();
++    tag->space_id = space_id;
++    tag->kind = item[0] == 'f' ? ItemKind::kFavorite : ItemKind::kPinned;
++    tag->item_id = item.substr(2);
++    contents->SetUserData(kTabTagKey, std::move(tag));
++  }
++}
++
++bool IsItemTab(const content::WebContents* contents) {
++  return GetTabTag(contents) != nullptr;
++}
++
++content::WebContents* FindItemTab(BrowserWindowInterface* browser,
++                                  const std::string& item_id) {
++  if (!browser || item_id.empty()) {
++    return nullptr;
++  }
++  TabStripModel* const model = browser->GetTabStripModel();
++  for (int i = 0; i < model->count(); ++i) {
++    content::WebContents* const contents = model->GetWebContentsAt(i);
++    if (const TabTag* tag = GetTabTag(contents);
++        tag && tag->item_id == item_id) {
++      return contents;
++    }
++  }
++  return nullptr;
++}
++
++void OpenItem(BrowserWindowInterface* browser,
++              const std::string& space_id,
++              ItemKind kind,
++              const std::string& item_id) {
++  TabStripModel* const model = browser->GetTabStripModel();
++  if (content::WebContents* contents = FindItemTab(browser, item_id)) {
++    model->ActivateTabAt(model->GetIndexOfWebContents(contents));
++    return;
++  }
++  const Item* item = Store::Get().FindItem(space_id, kind, item_id);
++  if (!item) {
++    return;
++  }
++  const GURL url = item->url;
++  content::WebContents* contents =
++      chrome::AddAndReturnTabAt(browser, url, -1, /*foreground=*/true);
++  SetTabTag(contents, space_id, kind, item_id);
++}
++
++}  // namespace saturn
+diff --git a/chrome/browser/ui/tabs/saturn_store.h b/chrome/browser/ui/tabs/saturn_store.h
+new file mode 100644
+index 0000000..0f6a07c
+--- /dev/null
++++ b/chrome/browser/ui/tabs/saturn_store.h
+@@ -0,0 +1,182 @@
++// Copyright 2026 The Saturn Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_TABS_SATURN_STORE_H_
++#define CHROME_BROWSER_UI_TABS_SATURN_STORE_H_
++
++#include <map>
++#include <string>
++#include <vector>
++
++#include "base/callback_list.h"
++#include "base/functional/callback_forward.h"
++#include "base/no_destructor.h"
++#include "base/supports_user_data.h"
++#include "url/gurl.h"
++
++class BrowserWindowInterface;
++class Profile;
++
++namespace content {
++class StoragePartitionConfig;
++class WebContents;
++}
++
++namespace saturn {
++
++// Saturn keeps its own state (spaces, favorites, Pinned list) outside
++// Chromium's profile data, in "<user data>/Saturn State.json", so it can be
++// synced with a Saturn account later.
++
++enum class ItemKind { kFavorite, kPinned };
++
++struct Item {
++  std::string id;
++  GURL url;
++  std::u16string title;
++};
++
++struct Space {
++  Space();
++  Space(const Space&);
++  Space& operator=(const Space&);
++  ~Space();
++
++  std::string id;
++  std::u16string name;
++  // Chromium profile directory (base name) the space lives in.
++  std::string profile;
++  // Empty: the space shares the profile's cookies and site data. Otherwise
++  // the name of the space's own (persistent) storage partition: separate
++  // cookies and logins, in the same window.
++  std::string partition;
++  // True once the old pinned tabs / Pinned bookmarks were imported.
++  bool imported = false;
++  std::vector<Item> favorites;
++  std::vector<Item> pinned;
++
++  std::vector<Item>& items(ItemKind kind) {
++    return kind == ItemKind::kFavorite ? favorites : pinned;
++  }
++  const std::vector<Item>& items(ItemKind kind) const {
++    return kind == ItemKind::kFavorite ? favorites : pinned;
++  }
++};
++
++class Store {
++ public:
++  static Store& Get();
++
++  Store(const Store&) = delete;
++  Store& operator=(const Store&) = delete;
++
++  // The file is read asynchronously at startup; until then everything is
++  // empty and changes are ignored. Observers run once it is loaded.
++  bool loaded() const { return loaded_; }
++
++  const std::vector<Space>& spaces() const { return spaces_; }
++  const Space* FindSpace(const std::string& id) const;
++
++  // The space shown in `browser`'s window. Picks (or creates) the first space
++  // using the window's profile. Empty until loaded.
++  std::string SpaceForWindow(BrowserWindowInterface* browser);
++  void SetSpaceForWindow(BrowserWindowInterface* browser,
++                         const std::string& space_id);
++
++  // Adds a space and returns its id. `own_cookies` gives it its own storage
++  // partition.
++  std::string AddSpace(const std::u16string& name,
++                       const std::string& profile,
++                       bool own_cookies = false);
++  void RemoveSpace(const std::string& space_id);
++  void SetImported(const std::string& space_id);
++
++  // Returns the id of the new (or already present, same URL) item, or "".
++  std::string AddItem(const std::string& space_id,
++                      ItemKind kind,
++                      const GURL& url,
++                      const std::u16string& title);
++  void RemoveItem(const std::string& space_id,
++                  ItemKind kind,
++                  const std::string& item_id);
++  const Item* FindItem(const std::string& space_id,
++                       ItemKind kind,
++                       const std::string& item_id) const;
++
++  // Runs after every change (and once after loading).
++  base::CallbackListSubscription AddObserver(base::RepeatingClosure callback);
++
++  // Tells observers that tabs were (un)assigned to items.
++  void NotifyTabsChanged() { observers_.Notify(); }
++
++ private:
++  friend class base::NoDestructor<Store>;
++  Store();
++  ~Store();
++
++  Space* MutableSpace(const std::string& id);
++  void OnLoaded(std::string json);
++  void Changed();
++  void Save();
++
++  bool loaded_ = false;
++  std::vector<Space> spaces_;
++  // The space shown last (new windows open on it).
++  std::string current_space_;
++  // Window (session id) -> space id.
++  std::map<int, std::string> window_spaces_;
++  base::RepeatingClosureList observers_;
++};
++
++// A tab opened from a favorite or a Pinned list row belongs to that item: it
++// is not listed with today's tabs, the item shows it instead.
++struct TabTag : public base::SupportsUserData::Data {
++  std::string space_id;
++  ItemKind kind = ItemKind::kFavorite;
++  std::string item_id;
++};
++
++const TabTag* GetTabTag(const content::WebContents* contents);
++void SetTabTag(content::WebContents* contents,
++               const std::string& space_id,
++               ItemKind kind,
++               const std::string& item_id);
++void ClearTabTag(content::WebContents* contents);
++
++// Whether the tab is hidden from today's list.
++bool IsItemTab(const content::WebContents* contents);
++
++// The space a tab belongs to ("" if not assigned yet).
++std::string GetTabSpace(const content::WebContents* contents);
++void SetTabSpace(content::WebContents* contents, const std::string& space_id);
++
++// The storage partition of a space with its own cookies.
++content::StoragePartitionConfig PartitionConfig(Profile* profile,
++                                                const std::string& partition);
++
++// Session restore: tab extra data keys, and re-applying them.
++inline constexpr char kSessionSpaceKey[] = "saturn_space";
++inline constexpr char kSessionPartitionKey[] = "saturn_partition";
++inline constexpr char kSessionItemKey[] = "saturn_item";
++void RestoreTabTags(content::WebContents* contents,
++                    const std::map<std::string, std::string>& extra_data);
++// Writes the tab's space / item into the session (also called when the
++// session file is rebuilt).
++void PersistTabTags(content::WebContents* contents);
++std::map<std::string, std::string> TabTagsForSession(
++    const content::WebContents* contents);
++
++// Finds the open tab of an item in `browser`'s window, if any.
++content::WebContents* FindItemTab(BrowserWindowInterface* browser,
++                                  const std::string& item_id);
++
++// Activates the item's tab, opening it first if needed.
++void OpenItem(BrowserWindowInterface* browser,
++              const std::string& space_id,
++              ItemKind kind,
++              const std::string& item_id);
++
++}  // namespace saturn
++
++#endif  // CHROME_BROWSER_UI_TABS_SATURN_STORE_H_
+diff --git a/chrome/browser/ui/tabs/tab_menu_model.cc b/chrome/browser/ui/tabs/tab_menu_model.cc
+index 1fadc94..fb02546 100644
+--- a/chrome/browser/ui/tabs/tab_menu_model.cc
++++ b/chrome/browser/ui/tabs/tab_menu_model.cc
+@@ -518,22 +518,9 @@ void TabMenuModel::Build(int index) {
+                       IDS_TAB_CXMENU_DUPLICATE);
+   SetElementIdentifierAt(GetItemCount() - 1, kDuplicateMenuItem);
+ 
+-  bool will_pin = tab_strip_->WillContextMenuPin(index);
+-  AddItemWithStringId(
+-      TabStripModel::CommandTogglePinned,
+-      will_pin ? IDS_TAB_CXMENU_PIN_TAB : IDS_TAB_CXMENU_UNPIN_TAB);
+-
+-  if (features::IsMenuSimplificationEnabled()) {
+-    SetIconForCommandId(
+-        TabStripModel::CommandTogglePinned,
+-        ui::ImageModel::FromVectorIcon(
+-            will_pin ? features::IsRoundedIconsEnabled() ? views::kKeepIcon
+-                                                         : views::kPinOldIcon
+-            : features::IsRoundedIconsEnabled() ? views::kKeepFilledIcon
+-                                                : views::kUnpinOldIcon,
+-            ui::kColorMenuIcon, ui::SimpleMenuModel::kDefaultIconSize));
+-  }
+-  // Saturn: keep this page in the sidebar's Pinned list (per space).
++  // Saturn: no Chromium pinned tabs; the tab moves into the space's
++  // favorites or Pinned list instead (saved by saturn::Store).
++  AddItem(TabStripModel::CommandSaturnAddToFavorites, u"Add to favourites");
+   AddItem(TabStripModel::CommandSaturnAddToPinned, u"Add to Pinned list");
+ 
+   // When the menu targets a single split, "Mute sites" opens a submenu that can
+diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
+index 9286675..7d4d542 100644
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -69,6 +69,7 @@
+ #include "chrome/browser/ui/tabs/tab_group_model.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/ui/tabs/saturn_pinned_folder.h"
++#include "chrome/browser/ui/tabs/saturn_store.h"
+ #include "chrome/browser/ui/tabs/tab_model.h"
+ #include "chrome/browser/ui/tabs/tab_muted_utils.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
+@@ -2728,6 +2729,7 @@ bool TabStripModel::IsContextMenuCommandEnabled(
+       return SupportsTabGroups();
+ 
+     case CommandSaturnAddToPinned:
++    case CommandSaturnAddToFavorites:
+       return true;
+ 
+     case CommandSendTabToSelf:
+@@ -2926,13 +2928,22 @@ void TabStripModel::ExecuteContextMenuCommand(int context_index,
+       break;
+     }
+ 
+-    case CommandSaturnAddToPinned: {
+-      bookmarks::BookmarkModel* const bookmark_model =
+-          BookmarkModelFactory::GetForBrowserContext(profile_);
++    case CommandSaturnAddToPinned:
++    case CommandSaturnAddToFavorites: {
++      saturn::Store& store = saturn::Store::Get();
++      const std::string space =
++          store.SpaceForWindow(delegate_->GetBrowserWindowInterface());
++      const saturn::ItemKind kind = command_id == CommandSaturnAddToFavorites
++                                        ? saturn::ItemKind::kFavorite
++                                        : saturn::ItemKind::kPinned;
+       for (int index : GetIndicesForCommand(context_index)) {
+         content::WebContents* const contents = GetWebContentsAt(index);
+-        saturn::AddToPinned(bookmark_model, contents->GetTitle(),
+-                            contents->GetLastCommittedURL());
++        const std::string item_id =
++            store.AddItem(space, kind, contents->GetLastCommittedURL(),
++                          contents->GetTitle());
++        if (!item_id.empty()) {
++          saturn::SetTabTag(contents, space, kind, item_id);
++        }
+       }
+       break;
+     }
+diff --git a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+index 6c953c9..1e26378 100644
+--- a/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
++++ b/chrome/browser/ui/views/frame/saturn_sidebar_constants.h
+@@ -57,7 +57,9 @@ inline constexpr int kSidebarButtonSpacing = 5;
+ inline constexpr int kSidebarRowGap = 8;
+ inline constexpr int kSidebarUrlPillHeight = 38;
+ inline constexpr int kSidebarUrlPillRadius = 10;
+-inline constexpr int kSidebarToolbarBottomGap = 8;
++// The strip region adds its own 8px top padding, so the favorites sit 8px
++// below the URL pill.
++inline constexpr int kSidebarToolbarBottomGap = 0;
+ inline constexpr int kSidebarToolbarHeight =
+     kSidebarButtonSize + kSidebarRowGap + kSidebarUrlPillHeight;
+ 
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 3c076de..be947d0 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -120,6 +120,20 @@
+ #include "ui/views/layout/layout_types.h"
+ #include "ui/views/layout/proposed_layout.h"
+ #include "chrome/browser/ui/views/toolbar/saturn_url_pill.h"
++#include "base/auto_reset.h"
++#include "base/strings/string_number_conversions.h"
++#include "url/url_constants.h"
++#include "base/no_destructor.h"
++#include "base/task/cancelable_task_tracker.h"
++#include "chrome/browser/favicon/favicon_service_factory.h"
++#include "chrome/browser/ui/tabs/saturn_store.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "components/favicon/content/content_favicon_driver.h"
++#include "components/favicon/core/favicon_service.h"
++#include "components/keyed_service/core/service_access_type.h"
++#include "ui/gfx/favicon_size.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/events/event_observer.h"
+ #include "ui/views/event_monitor.h"
+ #include "ui/views/view.h"
+@@ -129,20 +143,20 @@
+ namespace {
+ constexpr int kResizeAreaWidth = 5;
+ 
+-// Saturn: closes today's (unpinned) tabs. When there are no favorites a fresh
+-// New Tab is opened first so the window stays open.
++// Saturn: closes today's tabs (tabs of favorites and Pinned list items stay
++// open). Closing the last tab leaves a blank page (see TabStripModel).
+ void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
+   TabStripModel* const model = browser->GetTabStripModel();
+   std::vector<content::WebContents*> to_close;
+-  for (int i = model->IndexOfFirstNonPinnedTab(); i < model->count(); ++i) {
+-    to_close.push_back(model->GetWebContentsAt(i));
++  for (int i = 0; i < model->count(); ++i) {
++    content::WebContents* const contents = model->GetWebContentsAt(i);
++    if (!saturn::IsItemTab(contents)) {
++      to_close.push_back(contents);
++    }
+   }
+   if (to_close.empty()) {
+     return;
+   }
+-  if (model->IndexOfFirstNonPinnedTab() == 0) {
+-    chrome::NewTab(browser, NewTabTypes::kNewTabButton);
+-  }
+   for (content::WebContents* contents : to_close) {
+     const int index = model->GetIndexOfWebContents(contents);
+     if (index != TabStripModel::kNoTab) {
+@@ -151,111 +165,154 @@ void SaturnClearTodayTabs(BrowserWindowInterface* browser) {
+   }
+ }
+ 
+-// Saturn: spaces are profiles (separate cookies, favorites, Pinned list).
+-// Switching shows the target space's window where this one was and minimizes
+-// this one.
+-void SaturnSwitchSpace(BrowserWindowInterface* from,
+-                       const base::FilePath& path) {
+-  if (from->GetProfile()->GetOriginalProfile()->GetPath() == path) {
+-    return;
+-  }
+-  ui::BaseWindow* const window = from->GetWindow();
+-  const bool maximized = window->IsMaximized();
+-  const gfx::Rect bounds = window->GetRestoredBounds();
+-  profiles::SwitchToProfile(
+-      path, /*always_create=*/false,
+-      base::BindOnce(
+-          [](gfx::Rect bounds, bool maximized,
+-             BrowserWindowInterface* target) {
+-            if (!target) {
+-              return;
+-            }
+-            ui::BaseWindow* const target_window = target->GetWindow();
+-            if (maximized) {
+-              target_window->Maximize();
+-            } else {
+-              target_window->SetBounds(bounds);
+-            }
+-          },
+-          bounds, maximized));
+-  window->Minimize();
++// Saturn: spaces live in saturn::Store and switch inside the same window
++// (see SaturnTodayHeader::SwitchTo()). Defined below.
++void SaturnSwitchToSpace(views::View* from, const std::string& space_id);
++void SaturnDeleteSpace(base::WeakPtr<BrowserWindowInterface> browser,
++                       std::string space_id);
++void SaturnCreateSpace(views::View* from,
++                       const std::u16string& name,
++                       bool own_cookies);
++
++// Saturn: favorites and Pinned list items (saved by saturn::Store, not
++// Chromium pinned tabs or bookmarks). An item may have an open tab (tagged
++// with the item, hidden from today's tabs); clicking the item switches to it
++// or opens it.
++
++// Favicon of a closed item, looked up in history once and cached.
++std::map<GURL, gfx::ImageSkia>& SaturnFaviconCache() {
++  static base::NoDestructor<std::map<GURL, gfx::ImageSkia>> cache;
++  return *cache;
+ }
+ 
+-std::vector<ProfileAttributesEntry*> SaturnSpaces() {
+-  std::vector<ProfileAttributesEntry*> spaces;
+-  if (!g_browser_process->profile_manager()) {
+-    return spaces;
+-  }
+-  for (ProfileAttributesEntry* entry : g_browser_process->profile_manager()
+-                                           ->GetProfileAttributesStorage()
+-                                           .GetAllProfilesAttributesSortedForDisplay()) {
+-    if (!entry->IsOmitted()) {
+-      spaces.push_back(entry);
++class SaturnItemView : public views::Button,
++                       public views::ContextMenuController,
++                       public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(SaturnItemView, views::Button)
++
++ public:
++  SaturnItemView(BrowserWindowInterface* browser,
++                 std::string space_id,
++                 saturn::ItemKind kind,
++                 std::string item_id)
++      : views::Button(base::BindRepeating(&SaturnItemView::Open,
++                                          base::Unretained(this))),
++        browser_(browser),
++        space_id_(std::move(space_id)),
++        kind_(kind),
++        item_id_(std::move(item_id)) {
++    SetNotifyEnterExitOnChild(true);
++    set_context_menu_controller(this);
++    SetInstallFocusRingOnFocus(false);
++    if (kind_ == saturn::ItemKind::kPinned) {
++      title_ = AddChildView(std::make_unique<views::Label>());
++      title_->SetFontList(saturn::SidebarFont());
++      title_->SetAutoColorReadabilityEnabled(false);
++      title_->SetEnabledColor(SK_ColorWHITE);
++      title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      title_->SetElideBehavior(gfx::ELIDE_TAIL);
++      title_->SetCanProcessEventsWithinSubtree(false);
++
++      action_ = AddChildView(std::make_unique<views::ImageButton>(
++          base::BindRepeating(&SaturnItemView::OnActionPressed,
++                              base::Unretained(this))));
++      action_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
++      action_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
++      action_->SetVisible(false);
+     }
++    Refresh();
+   }
+-  return spaces;
+-}
+ 
+-void SaturnOpenOrSwitchTo(BrowserWindowInterface* browser, const GURL& url) {
+-  TabStripModel* const model = browser->GetTabStripModel();
+-  for (int i = 0; i < model->count(); ++i) {
+-    content::WebContents* const contents = model->GetWebContentsAt(i);
+-    if (contents->GetLastCommittedURL() == url ||
+-        contents->GetVisibleURL() == url) {
+-      model->ActivateTabAt(i);
++  const std::string& item_id() const { return item_id_; }
++
++  // Re-reads title, favicon and open/active state.
++  void Refresh() {
++    const saturn::Item* item =
++        saturn::Store::Get().FindItem(space_id_, kind_, item_id_);
++    if (!item) {
+       return;
+     }
++    content::WebContents* const tab = saturn::FindItemTab(browser_, item_id_);
++    open_ = tab != nullptr;
++    active_ = tab && browser_->GetTabStripModel()->GetActiveWebContents() == tab;
++
++    gfx::ImageSkia icon;
++    if (tab) {
++      if (auto* driver = favicon::ContentFaviconDriver::FromWebContents(tab)) {
++        icon = driver->GetFavicon().AsImageSkia();
++      }
++    }
++    if (icon.isNull()) {
++      auto& cache = SaturnFaviconCache();
++      if (auto it = cache.find(item->url); it != cache.end()) {
++        icon = it->second;
++      } else {
++        LoadFavicon(item->url);
++      }
++    }
++    icon_ = icon;
++
++    const std::u16string title =
++        tab && !tab->GetTitle().empty() ? tab->GetTitle() : item->title;
++    if (title_) {
++      title_->SetText(title);
++    }
++    SetTooltipText(title);
++    GetViewAccessibility().SetName(title);
++    UpdateAction();
++    SchedulePaint();
+   }
+-  chrome::AddTabAt(browser, url, -1, /*foreground=*/true);
+-}
+ 
+-void SaturnRemovePinnedUrl(base::WeakPtr<Profile> profile, GURL url) {
+-  if (!profile) {
+-    return;
++  // views::View:
++  void Layout(PassKey) override {
++    if (title_) {
++      constexpr int kTitleLeft = 34;
++      const int action_x = width() - 5 - 20 - 4;
++      action_->SetBounds(action_x, (height() - 28) / 2, 28, 28);
++      const int right = action_->GetVisible() ? action_x : width() - 8;
++      title_->SetBounds(kTitleLeft, 0, std::max(0, right - kTitleLeft),
++                        height());
++    }
+   }
+-  bookmarks::BookmarkModel* const model =
+-      BookmarkModelFactory::GetForBrowserContext(profile.get());
+-  saturn::RemoveFromPinned(model, saturn::FindInPinned(model, url));
+-}
+ 
+-// Saturn: one row of the Pinned list. Click opens the page (or switches to
+-// the tab already showing it); right-click offers "Remove from Pinned list".
+-class SaturnPinnedRow : public views::LabelButton,
+-                        public views::ContextMenuController,
+-                        public ui::SimpleMenuModel::Delegate {
+-  METADATA_HEADER(SaturnPinnedRow, views::LabelButton)
++  void OnPaintBackground(gfx::Canvas* canvas) override {
++    const bool hot = GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++    int alpha;
++    if (kind_ == saturn::ItemKind::kFavorite) {
++      alpha = active_ ? 0x33 : hot ? 0x21 : 0x0D;
++    } else {
++      alpha = active_ ? 0x33 : hot ? 0x0D : 0;
++    }
++    if (alpha) {
++      cc::PaintFlags flags;
++      flags.setAntiAlias(true);
++      flags.setColor(SkColorSetARGB(alpha, 0xFF, 0xFF, 0xFF));
++      canvas->DrawRoundRect(GetLocalBounds(), saturn::kSidebarTileRadius,
++                            flags);
++    }
++  }
+ 
+- public:
+-  SaturnPinnedRow(BrowserWindowInterface* browser,
+-                  const std::u16string& title,
+-                  const GURL& url,
+-                  const gfx::Image& favicon)
+-      : views::LabelButton(base::BindRepeating(&SaturnPinnedRow::Open,
+-                                               base::Unretained(this)),
+-                           title),
+-        browser_(browser),
+-        url_(url) {
+-    SetImageModel(
+-        views::Button::STATE_NORMAL,
+-        favicon.IsEmpty()
+-            ? ui::ImageModel::FromVectorIcon(
+-                  vector_icons::kGlobeIcon,
+-                  SkColorSetARGB(0xB3, 0xFF, 0xFF, 0xFF), 16)
+-            : ui::ImageModel::FromImage(favicon));
+-    SetImageLabelSpacing(8);
+-    SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(0, 6, 0, 8)));
+-    SetEnabledTextColors(SK_ColorWHITE);
+-    label()->SetFontList(saturn::SidebarFont());
+-    label()->SetElideBehavior(gfx::ELIDE_TAIL);
+-    SetTooltipText(base::UTF8ToUTF16(url.spec()));
+-    set_context_menu_controller(this);
+-    UpdateBackground();
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const int size = gfx::kFaviconSize;
++    const gfx::Rect icon_bounds =
++        kind_ == saturn::ItemKind::kFavorite
++            ? gfx::Rect((width() - size) / 2, (height() - size) / 2, size,
++                        size)
++            : gfx::Rect(10, (height() - size) / 2, size, size);
++    if (icon_.isNull()) {
++      const gfx::ImageSkia globe = gfx::CreateVectorIcon(
++          vector_icons::kGlobeIcon, size,
++          SkColorSetARGB(0xB3, 0xFF, 0xFF, 0xFF));
++      canvas->DrawImageInt(globe, icon_bounds.x(), icon_bounds.y());
++      return;
++    }
++    canvas->DrawImageInt(icon_, 0, 0, icon_.width(), icon_.height(),
++                         icon_bounds.x(), icon_bounds.y(), size, size, true);
+   }
+ 
+-  // views::Button:
+   void StateChanged(ButtonState old_state) override {
+-    views::LabelButton::StateChanged(old_state);
+-    UpdateBackground();
++    views::Button::StateChanged(old_state);
++    UpdateAction();
+   }
+ 
+   // views::ContextMenuController:
+@@ -264,7 +321,13 @@ class SaturnPinnedRow : public views::LabelButton,
+                                   ui::mojom::MenuSourceType source_type)
+       override {
+     menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+-    menu_model_->AddItem(kRemoveCommand, u"Remove from Pinned list");
++    if (open_) {
++      menu_model_->AddItem(kCloseCommand, u"Close tab");
++    }
++    menu_model_->AddItem(kRemoveCommand,
++                         kind_ == saturn::ItemKind::kFavorite
++                             ? u"Remove from favourites"
++                             : u"Remove from Pinned list");
+     menu_runner_ = std::make_unique<views::MenuRunner>(
+         menu_model_.get(), views::MenuRunner::CONTEXT_MENU);
+     menu_runner_->RunMenuAt(GetWidget(), nullptr,
+@@ -274,153 +337,272 @@ class SaturnPinnedRow : public views::LabelButton,
+ 
+   // ui::SimpleMenuModel::Delegate:
+   void ExecuteCommand(int command_id, int event_flags) override {
+-    if (command_id != kRemoveCommand) {
+-      return;
+-    }
+-    // Removing rebuilds the list (and deletes this row), so do it after the
+-    // menu has finished.
++    // Both can delete this view; run them after the menu is done.
+     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(&SaturnRemovePinnedUrl,
+-                                  browser_->GetProfile()->GetWeakPtr(), url_));
++        FROM_HERE,
++        base::BindOnce(command_id == kCloseCommand ? &SaturnItemView::CloseTab
++                                                   : &SaturnItemView::Remove,
++                       browser_->GetWeakPtr(), space_id_, kind_, item_id_));
+   }
+ 
+  private:
+-  static constexpr int kRemoveCommand = 1;
++  static constexpr int kCloseCommand = 1;
++  static constexpr int kRemoveCommand = 2;
++
++  static void CloseTab(base::WeakPtr<BrowserWindowInterface> browser,
++                       std::string space_id,
++                       saturn::ItemKind kind,
++                       std::string item_id) {
++    if (!browser) {
++      return;
++    }
++    TabStripModel* const model = browser->GetTabStripModel();
++    if (content::WebContents* tab =
++            saturn::FindItemTab(browser.get(), item_id)) {
++      model->CloseWebContentsAt(model->GetIndexOfWebContents(tab),
++                                TabCloseTypes::CLOSE_USER_GESTURE);
++    }
++  }
++
++  static void Remove(base::WeakPtr<BrowserWindowInterface> browser,
++                     std::string space_id,
++                     saturn::ItemKind kind,
++                     std::string item_id) {
++    // An open tab stays open and goes back to today's tabs.
++    if (browser) {
++      saturn::ClearTabTag(saturn::FindItemTab(browser.get(), item_id));
++    }
++    saturn::Store::Get().RemoveItem(space_id, kind, item_id);
++  }
++
++  void Open() { saturn::OpenItem(browser_, space_id_, kind_, item_id_); }
++
++  // Close the open tab, or remove the (closed) item.
++  void OnActionPressed() {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(open_ ? &SaturnItemView::CloseTab
++                             : &SaturnItemView::Remove,
++                       browser_->GetWeakPtr(), space_id_, kind_, item_id_));
++  }
+ 
+-  void Open() { SaturnOpenOrSwitchTo(browser_, url_); }
++  void UpdateAction() {
++    if (!action_) {
++      return;
++    }
++    const bool show = GetState() == STATE_HOVERED ||
++                      GetState() == STATE_PRESSED || IsMouseHovered();
++    action_->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(
++            open_ ? kSaturnCloseTabIcon : kSaturnRemoveTabIcon,
++            SK_ColorWHITE, 20));
++    action_->SetTooltipText(open_ ? u"Close tab"
++                                  : kind_ == saturn::ItemKind::kFavorite
++                                        ? u"Remove from favourites"
++                                        : u"Remove from Pinned list");
++    if (action_->GetVisible() != show) {
++      action_->SetVisible(show);
++      InvalidateLayout();
++    }
++  }
+ 
+-  void UpdateBackground() {
+-    const bool hot = GetState() == views::Button::STATE_HOVERED ||
+-                     GetState() == views::Button::STATE_PRESSED;
+-    SetBackground(views::CreateRoundedRectBackground(
+-        SkColorSetARGB(hot ? 0x1A : 0x0D, 0xFF, 0xFF, 0xFF),
+-        GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius)));
++  void LoadFavicon(const GURL& url) {
++    favicon::FaviconService* const service =
++        FaviconServiceFactory::GetForProfile(
++            browser_->GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
++    if (!service) {
++      return;
++    }
++    service->GetFaviconImageForPageURL(
++        url,
++        base::BindOnce(
++            [](base::WeakPtr<SaturnItemView> view, GURL url,
++               const favicon_base::FaviconImageResult& result) {
++              if (result.image.IsEmpty()) {
++                return;
++              }
++              SaturnFaviconCache()[url] = result.image.AsImageSkia();
++              if (view) {
++                view->Refresh();
++              }
++            },
++            weak_factory_.GetWeakPtr(), url),
++        &favicon_tracker_);
+   }
+ 
+   raw_ptr<BrowserWindowInterface> browser_;
+-  const GURL url_;
++  const std::string space_id_;
++  const saturn::ItemKind kind_;
++  const std::string item_id_;
++  bool open_ = false;
++  bool active_ = false;
++  gfx::ImageSkia icon_;
++  raw_ptr<views::Label> title_ = nullptr;
++  raw_ptr<views::ImageButton> action_ = nullptr;
+   std::unique_ptr<ui::SimpleMenuModel> menu_model_;
+   std::unique_ptr<views::MenuRunner> menu_runner_;
++  base::CancelableTaskTracker favicon_tracker_;
++  base::WeakPtrFactory<SaturnItemView> weak_factory_{this};
+ };
+ 
+-BEGIN_METADATA(SaturnPinnedRow)
++BEGIN_METADATA(SaturnItemView)
+ END_METADATA
+ 
+-// Saturn: the space's Pinned list ("Other bookmarks/Pinned").
+-class SaturnPinnedList : public views::View,
+-                         public bookmarks::BaseBookmarkModelObserver {
+-  METADATA_HEADER(SaturnPinnedList, views::View)
++// Saturn: the favorites grid (3 columns of 46px tiles) or the Pinned list
++// (38px rows) of the window's current space.
++class SaturnItemsView : public views::View {
++  METADATA_HEADER(SaturnItemsView, views::View)
+ 
+  public:
+-  explicit SaturnPinnedList(BrowserWindowInterface* browser)
+-      : browser_(browser),
+-        model_(BookmarkModelFactory::GetForBrowserContext(
+-            browser->GetProfile())) {
+-    if (model_) {
+-      observation_.Observe(model_.get());
+-      Rebuild();
++  SaturnItemsView(BrowserWindowInterface* browser, saturn::ItemKind kind)
++      : browser_(browser), kind_(kind) {}
++
++  void SetSpace(const std::string& space_id) {
++    if (space_id_ == space_id) {
++      return;
+     }
++    space_id_ = space_id;
++    RemoveAllChildViews();
++    Sync();
+   }
+ 
+-  // bookmarks::BaseBookmarkModelObserver:
+-  void BookmarkModelChanged() override { Rebuild(); }
+-  void BookmarkNodeFaviconChanged(const bookmarks::BookmarkNode* node) override {
+-    if (node->parent() == saturn::FindPinnedFolder(model_)) {
+-      Rebuild();
++  // Adds/removes item views to match the store, then refreshes them.
++  void Sync() {
++    const saturn::Space* space = saturn::Store::Get().FindSpace(space_id_);
++    std::vector<std::string> ids;
++    if (space) {
++      for (const saturn::Item& item : space->items(kind_)) {
++        ids.push_back(item.id);
++      }
++    }
++    std::vector<std::string> current;
++    for (views::View* child : children()) {
++      current.push_back(static_cast<SaturnItemView*>(child)->item_id());
++    }
++    if (ids != current) {
++      RemoveAllChildViews();
++      for (const std::string& id : ids) {
++        AddChildView(
++            std::make_unique<SaturnItemView>(browser_, space_id_, kind_, id));
++      }
++      PreferredSizeChanged();
++    } else {
++      for (views::View* child : children()) {
++        static_cast<SaturnItemView*>(child)->Refresh();
++      }
+     }
+   }
+-  void BookmarkModelBeingDeleted() override {
+-    observation_.Reset();
+-    model_ = nullptr;
++
++  // Shows an outlined, empty slot where a dropped tab would go.
++  void SetDropHint(bool show) {
++    if (drop_hint_ == show) {
++      return;
++    }
++    drop_hint_ = show;
++    PreferredSizeChanged();
++    SchedulePaint();
+   }
+ 
+   // views::View:
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+-    const int n = static_cast<int>(children().size());
+-    return gfx::Size(0, n ? n * saturn::kPinnedRowHeight +
+-                                (n - 1) * saturn::kPinnedRowGap
+-                          : 0);
++    const int n = SlotCount();
++    if (!n) {
++      return gfx::Size();
++    }
++    if (kind_ == saturn::ItemKind::kFavorite) {
++      const int rows = (n + saturn::kFavoritesColumns - 1) /
++                       saturn::kFavoritesColumns;
++      return gfx::Size(0, rows * saturn::kFavoritesTileHeight +
++                              (rows - 1) * saturn::kFavoritesGap);
++    }
++    return gfx::Size(
++        0, n * saturn::kPinnedRowHeight + (n - 1) * saturn::kPinnedRowGap);
+   }
+ 
+   void Layout(PassKey) override {
+-    int y = 0;
+-    for (views::View* child : children()) {
+-      child->SetBounds(0, y, width(), saturn::kPinnedRowHeight);
+-      y += saturn::kPinnedRowHeight + saturn::kPinnedRowGap;
++    for (size_t i = 0; i < children().size(); ++i) {
++      children()[i]->SetBoundsRect(SlotBounds(i));
+     }
+   }
+ 
++  void OnPaint(gfx::Canvas* canvas) override {
++    views::View::OnPaint(canvas);
++    if (!drop_hint_) {
++      return;
++    }
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setStyle(cc::PaintFlags::kStroke_Style);
++    flags.setStrokeWidth(1.5f);
++    flags.setColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
++    gfx::RectF r(SlotBounds(children().size()));
++    r.Inset(0.75f);
++    canvas->DrawRoundRect(r, saturn::kSidebarTileRadius, flags);
++  }
++
+  private:
+-  void Rebuild() {
+-    RemoveAllChildViews();
+-    if (const bookmarks::BookmarkNode* folder =
+-            saturn::FindPinnedFolder(model_)) {
+-      for (const auto& node : folder->children()) {
+-        if (node->is_url()) {
+-          AddChildView(std::make_unique<SaturnPinnedRow>(
+-              browser_, node->GetTitle(), node->url(),
+-              model_->GetFavicon(node.get())));
+-        }
+-      }
++  int SlotCount() const {
++    return static_cast<int>(children().size()) + (drop_hint_ ? 1 : 0);
++  }
++
++  gfx::Rect SlotBounds(size_t index) const {
++    const int i = static_cast<int>(index);
++    if (kind_ == saturn::ItemKind::kFavorite) {
++      constexpr int kCols = saturn::kFavoritesColumns;
++      const int tile_w =
++          std::max(0, (width() - saturn::kFavoritesGap * (kCols - 1)) / kCols);
++      return gfx::Rect(
++          (i % kCols) * (tile_w + saturn::kFavoritesGap),
++          (i / kCols) * (saturn::kFavoritesTileHeight + saturn::kFavoritesGap),
++          tile_w, saturn::kFavoritesTileHeight);
+     }
+-    PreferredSizeChanged();
++    return gfx::Rect(0, i * (saturn::kPinnedRowHeight + saturn::kPinnedRowGap),
++                     width(), saturn::kPinnedRowHeight);
+   }
+ 
+   raw_ptr<BrowserWindowInterface> browser_;
+-  raw_ptr<bookmarks::BookmarkModel> model_;
+-  base::ScopedObservation<bookmarks::BookmarkModel,
+-                          bookmarks::BookmarkModelObserver>
+-      observation_{this};
++  const saturn::ItemKind kind_;
++  std::string space_id_;
++  bool drop_hint_ = false;
+ };
+ 
+-BEGIN_METADATA(SaturnPinnedList)
++BEGIN_METADATA(SaturnItemsView)
+ END_METADATA
+ 
+-// Saturn: one dot per space; the current space is bright. Click switches.
++// Saturn: one dot per space (saturn::Store); the window's current space is
++// bright. Click switches (in this window); right-click offers Delete.
+ class SaturnSpaceDots : public views::View,
+-                        public ProfileAttributesStorage::Observer {
++                        public views::ContextMenuController,
++                        public ui::SimpleMenuModel::Delegate {
+   METADATA_HEADER(SaturnSpaceDots, views::View)
+ 
+  public:
+   explicit SaturnSpaceDots(BrowserWindowInterface* browser)
+       : browser_(browser) {
+-    if (g_browser_process->profile_manager()) {
+-      observation_.Observe(&g_browser_process->profile_manager()
+-                                ->GetProfileAttributesStorage());
+-    }
+-  }
+-
+-  // ProfileAttributesStorage::Observer:
+-  void OnProfileAdded(const base::FilePath& profile_path) override {
+-    Refresh();
+-  }
+-  void OnProfileWasRemoved(const base::FilePath& profile_path,
+-                           const std::u16string& profile_name) override {
+-    Refresh();
+-  }
+-  void OnProfileNameChanged(const base::FilePath& profile_path,
+-                            const std::u16string& old_profile_name) override {
+-    Refresh();
++    set_context_menu_controller(this);
++    subscription_ = saturn::Store::Get().AddObserver(base::BindRepeating(
++        &SaturnSpaceDots::Refresh, base::Unretained(this)));
+   }
+ 
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+-    const int n = std::max<int>(1, SaturnSpaces().size());
++    const int n = std::max<int>(1, saturn::Store::Get().spaces().size());
+     return gfx::Size(n * saturn::kSpaceDotPitch, saturn::kSpacesBarHeight);
+   }
+ 
+   void OnPaint(gfx::Canvas* canvas) override {
+-    const auto spaces = SaturnSpaces();
+-    const base::FilePath current =
+-        browser_->GetProfile()->GetOriginalProfile()->GetPath();
++    saturn::Store& store = saturn::Store::Get();
++    const auto& spaces = store.spaces();
++    const std::string current = store.SpaceForWindow(browser_);
+     const int n = static_cast<int>(spaces.size());
+     const int x0 = (width() - n * saturn::kSpaceDotPitch) / 2;
+     cc::PaintFlags flags;
+     flags.setAntiAlias(true);
+     for (int i = 0; i < n; ++i) {
+-      flags.setColor(SkColorSetARGB(
+-          spaces[i]->GetPath() == current ? 0xFF : 0x4D, 0xFF, 0xFF, 0xFF));
++      flags.setColor(SkColorSetARGB(spaces[i].id == current ? 0xFF : 0x4D,
++                                    0xFF, 0xFF, 0xFF));
+       canvas->DrawCircle(
+           gfx::PointF(x0 + i * saturn::kSpaceDotPitch +
+                           saturn::kSpaceDotPitch / 2.0f,
+@@ -432,21 +614,50 @@ class SaturnSpaceDots : public views::View,
+   bool OnMousePressed(const ui::MouseEvent& event) override { return true; }
+ 
+   void OnMouseReleased(const ui::MouseEvent& event) override {
+-    const auto spaces = SaturnSpaces();
+-    if (const int i = IndexAt(event.location(), spaces.size()); i >= 0) {
+-      SaturnSwitchSpace(browser_, spaces[i]->GetPath());
++    if (!event.IsLeftMouseButton()) {
++      return;
++    }
++    if (const int i = IndexAt(event.location()); i >= 0) {
++      SaturnSwitchToSpace(this, saturn::Store::Get().spaces()[i].id);
+     }
+   }
+ 
+   std::u16string GetRenderedTooltipText(const gfx::Point& p) const override {
+-    const auto spaces = SaturnSpaces();
+-    const int i = IndexAt(p, spaces.size());
+-    return i >= 0 ? spaces[i]->GetLocalProfileName() : std::u16string();
++    const int i = IndexAt(p);
++    return i >= 0 ? saturn::Store::Get().spaces()[i].name : std::u16string();
++  }
++
++  // views::ContextMenuController:
++  void ShowContextMenuForViewImpl(views::View* source,
++                                  const gfx::Point& point,
++                                  ui::mojom::MenuSourceType source_type)
++      override {
++    gfx::Point local = point;
++    views::View::ConvertPointFromScreen(this, &local);
++    const int i = IndexAt(local);
++    if (i < 0 || saturn::Store::Get().spaces().size() < 2) {
++      return;
++    }
++    menu_space_ = saturn::Store::Get().spaces()[i].id;
++    menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++    menu_model_->AddItem(1, u"Delete space");
++    menu_runner_ = std::make_unique<views::MenuRunner>(
++        menu_model_.get(), views::MenuRunner::CONTEXT_MENU);
++    menu_runner_->RunMenuAt(GetWidget(), nullptr,
++                            gfx::Rect(point, gfx::Size()),
++                            views::MenuAnchorPosition::kTopLeft, source_type);
++  }
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(&SaturnDeleteSpace, browser_->GetWeakPtr(),
++                                  menu_space_));
+   }
+ 
+  private:
+-  int IndexAt(const gfx::Point& p, size_t count) const {
+-    const int n = static_cast<int>(count);
++  int IndexAt(const gfx::Point& p) const {
++    const int n = static_cast<int>(saturn::Store::Get().spaces().size());
+     const int x0 = (width() - n * saturn::kSpaceDotPitch) / 2;
+     const int i = (p.x() - x0) / saturn::kSpaceDotPitch;
+     return (p.x() >= x0 && i >= 0 && i < n) ? i : -1;
+@@ -458,9 +669,10 @@ class SaturnSpaceDots : public views::View,
+   }
+ 
+   raw_ptr<BrowserWindowInterface> browser_;
+-  base::ScopedObservation<ProfileAttributesStorage,
+-                          ProfileAttributesStorage::Observer>
+-      observation_{this};
++  std::string menu_space_;
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++  base::CallbackListSubscription subscription_;
+ };
+ 
+ BEGIN_METADATA(SaturnSpaceDots)
+@@ -514,10 +726,26 @@ class SaturnSpacesBar : public views::View {
+         kSaturnSettingsIcon, u"Settings and more"));
+     dots_ = AddChildView(std::make_unique<SaturnSpaceDots>(browser));
+     new_space_ = AddChildView(SaturnBarButton(
+-        base::BindRepeating([] {
+-          ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
+-              ProfilePicker::EntryPoint::kProfileMenuAddNewProfile));
+-        }),
++        base::BindRepeating(
++            [](BrowserView* view, SaturnSpacesBar* bar) {
++              ShowSaturnNewSpacePopup(
++                  view,
++                  base::BindOnce(
++                      [](base::WeakPtr<BrowserWindowInterface> browser,
++                         const std::u16string& name, bool own_cookies) {
++                        BrowserView* const view =
++                            browser ? BrowserView::GetBrowserViewForBrowser(
++                                          browser.get())
++                                    : nullptr;
++                        if (view) {
++                          SaturnCreateSpace(
++                              view->vertical_tab_strip_region_view_for_testing(),
++                              name, own_cookies);
++                        }
++                      },
++                      view->browser()->GetWeakPtr()));
++            },
++            base::Unretained(browser_view), base::Unretained(this)),
+         kSaturnPlusIcon, u"New space"));
+   }
+ 
+@@ -549,20 +777,26 @@ class SaturnSpacesBar : public views::View {
+ BEGIN_METADATA(SaturnSpacesBar)
+ END_METADATA
+ 
+-// Saturn: the block above today's tabs: the space's Pinned list, a divider
+-// with "Clear" on the right, then a "New tab" row (shown while expanded).
+-class SaturnTodayHeader : public views::View, public ui::EventObserver {
++// Saturn: the block above today's tabs: the space's favorites, its Pinned
++// list, a divider (Clear appears on it while the cursor is over the sidebar),
++// then the "New tab" row (shown while expanded).
++class SaturnTodayHeader : public views::View,
++                          public ui::EventObserver,
++                          public TabStripModelObserver {
+   METADATA_HEADER(SaturnTodayHeader, views::View)
+ 
+  public:
+-  explicit SaturnTodayHeader(BrowserWindowInterface* browser) {
++  explicit SaturnTodayHeader(BrowserWindowInterface* browser)
++      : browser_(browser) {
+     const SkColor muted = SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF);
+ 
+-    pinned_list_ = AddChildView(std::make_unique<SaturnPinnedList>(browser));
++    favorites_ = AddChildView(std::make_unique<SaturnItemsView>(
++        browser, saturn::ItemKind::kFavorite));
++    pinned_list_ = AddChildView(std::make_unique<SaturnItemsView>(
++        browser, saturn::ItemKind::kPinned));
+ 
+     divider_ = AddChildView(std::make_unique<views::View>());
+-    divider_->SetBackground(
+-        views::CreateSolidBackground(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF)));
++    divider_->SetBackground(views::CreateSolidBackground(muted));
+ 
+     auto clear = std::make_unique<views::LabelButton>(
+         base::BindRepeating(&SaturnClearTodayTabs, base::Unretained(browser)),
+@@ -579,6 +813,9 @@ class SaturnTodayHeader : public views::View, public ui::EventObserver {
+     clear->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
+     clear->SetTooltipText(u"Close today's tabs");
+     clear_ = AddChildView(std::move(clear));
++    // Clear shows only while the cursor is over the sidebar; the divider is
++    // always there and makes room for it.
++    clear_->SetVisible(false);
+ 
+     auto new_tab = std::make_unique<shared::NewTabButton>(
+         browser, saturn::kTodayNewTabHeight,
+@@ -597,9 +834,16 @@ class SaturnTodayHeader : public views::View, public ui::EventObserver {
+     new_tab_ = AddChildView(std::move(new_tab));
+     new_tab_->layer()->SetOpacity(0.4f);
+ 
+-    // The divider and Clear show only while the cursor is over the sidebar.
+-    divider_->SetVisible(false);
+-    clear_->SetVisible(false);
++    browser->GetTabStripModel()->AddObserver(this);
++    store_subscription_ = saturn::Store::Get().AddObserver(base::BindRepeating(
++        &SaturnTodayHeader::OnStoreChanged, base::Unretained(this)));
++    OnStoreChanged();
++  }
++
++  ~SaturnTodayHeader() override {
++    if (browser_) {
++      browser_->GetTabStripModel()->RemoveObserver(this);
++    }
+   }
+ 
+   // views::View:
+@@ -612,72 +856,218 @@ class SaturnTodayHeader : public views::View, public ui::EventObserver {
+   void RemovedFromWidget() override { event_monitor_.reset(); }
+ 
+   // ui::EventObserver:
+-  void OnEvent(const ui::Event& event) override {
+-    UpdateHoverChrome();
++  void OnEvent(const ui::Event& event) override { UpdateHoverChrome(); }
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override {
++    if (browser_ && !space_id_.empty()) {
++      if (change.type() == TabStripModelChange::kInserted) {
++        for (const auto& inserted : change.GetInsert()->contents) {
++          if (saturn::GetTabSpace(inserted.contents).empty()) {
++            saturn::SetTabSpace(inserted.contents, space_id_);
++          }
++        }
++      }
++      content::WebContents* const active = selection.new_contents;
++      if (selection.active_tab_changed() && active) {
++        const std::string space = saturn::GetTabSpace(active);
++        if (space == space_id_) {
++          if (auto* tab = tabs::TabInterface::MaybeGetFromContents(active)) {
++            last_active_[space_id_] = tab->GetHandle();
++          }
++        } else if (!space.empty() && !switching_) {
++          if (change.type() == TabStripModelChange::kRemoved) {
++            // The space's active tab closed and Chromium picked a tab of
++            // another space: stay in this space.
++            base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++                FROM_HERE,
++                base::BindOnce(&SaturnTodayHeader::EnsureActiveTabInSpace,
++                               weak_factory_.GetWeakPtr()));
++          } else {
++            // The user picked a tab of another space (e.g. Ctrl+Tab).
++            saturn::Store::Get().SetSpaceForWindow(browser_, space);
++          }
++        }
++      }
++    }
++    RefreshItems();
++  }
++
++  // Shows `space_id` in this window: its favorites, Pinned list and today's
++  // tabs; activates its last active tab (or a blank one).
++  void SwitchTo(const std::string& space_id) {
++    if (!browser_ || space_id == space_id_) {
++      return;
++    }
++    switching_ = true;
++    saturn::Store::Get().SetSpaceForWindow(browser_, space_id);
++    EnsureActiveTabInSpace();
++    switching_ = false;
++  }
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override {
++    if (tab && saturn::IsItemTab(tab->GetContents())) {
++      RefreshItems();
++    }
++  }
++  void OnTabStripModelDestroyed(TabStripModel* tab_strip_model) override {
++    browser_ = nullptr;
+   }
+ 
+   // views::View:
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+-    return gfx::Size(
+-        0, PinnedListHeight() + HintHeight() + saturn::kTodayHeaderHeight);
++    return gfx::Size(0, DividerTop() + saturn::kTodayHeaderHeight);
+   }
+ 
+   void ChildPreferredSizeChanged(views::View* child) override {
+     PreferredSizeChanged();
++    InvalidateLayout();
+   }
+ 
+-  // Saturn: height of the Pinned list drop zone (the list and the divider
+-  // row below it).
+-  int PinnedDropZoneHeight() const {
+-    return PinnedListHeight() + HintHeight() +
+-           saturn::kTodayDividerRowHeight;
++  // Drop zones for a dragged tab, in this view's coordinates: favorites
++  // (above `FavoritesZoneBottom()`), then the Pinned list (above
++  // `PinnedZoneBottom()`).
++  int FavoritesZoneBottom() const { return PinnedTop(); }
++  int PinnedZoneBottom() const {
++    return DividerTop() + saturn::kTodayDividerRowHeight;
+   }
+ 
+-  // Shows an outlined empty row at the end of the Pinned list.
+-  void SetPinnedDropHint(bool show) {
+-    if (pinned_hint_ == show) {
+-      return;
+-    }
+-    pinned_hint_ = show;
+-    PreferredSizeChanged();
+-    InvalidateLayout();
+-    SchedulePaint();
++  void SetDropHint(int zone) {
++    favorites_->SetDropHint(zone == 1);
++    pinned_list_->SetDropHint(zone == 2);
+   }
+ 
+-  void OnPaint(gfx::Canvas* canvas) override {
+-    views::View::OnPaint(canvas);
+-    if (!pinned_hint_) {
+-      return;
+-    }
+-    cc::PaintFlags flags;
+-    flags.setAntiAlias(true);
+-    flags.setStyle(cc::PaintFlags::kStroke_Style);
+-    flags.setStrokeWidth(1.5f);
+-    flags.setColor(SkColorSetARGB(0x4D, 0xFF, 0xFF, 0xFF));
+-    gfx::RectF r(0, PinnedListHeight(), width(), saturn::kPinnedRowHeight);
+-    r.Inset(0.75f);
+-    canvas->DrawRoundRect(r, saturn::kSidebarTileRadius, flags);
+-  }
++  const std::string& space_id() const { return space_id_; }
+ 
+   void Layout(PassKey) override {
+     const int w = width();
+-    const int list_h = PinnedListHeight();
+-    pinned_list_->SetBounds(0, 0, w,
++    favorites_->SetBounds(0, 0, w, favorites_->GetPreferredSize().height());
++    pinned_list_->SetBounds(0, PinnedTop(), w,
+                             pinned_list_->GetPreferredSize().height());
+-    const int top = list_h + HintHeight();
++    const int top = DividerTop();
+     const int row = saturn::kTodayDividerRowHeight;
+     clear_->SetBounds(std::max(0, w - saturn::kTodayClearWidth), top,
+                       std::min(w, saturn::kTodayClearWidth), row);
+-    divider_->SetBounds(
+-        0, top + row / 2, std::max(0, w - saturn::kTodayClearWidth - 14), 1);
++    const int divider_w =
++        clear_->GetVisible() ? w - saturn::kTodayClearWidth - 14 : w;
++    divider_->SetBounds(0, top + row / 2, std::max(0, divider_w), 1);
+     new_tab_->SetBounds(0, top + row + saturn::kTodayNewTabTopGap, w,
+                         saturn::kTodayNewTabHeight);
+   }
+ 
+  private:
+-  // Shows the divider and Clear while the cursor is inside the sidebar
+-  // (the strip region view plus the toolbar above it, full window height).
++  int PinnedTop() const {
++    const int h = favorites_->GetPreferredSize().height();
++    return h ? h + saturn::kFavoritesGap : 0;
++  }
++
++  int DividerTop() const {
++    const int h = pinned_list_->GetPreferredSize().height();
++    return PinnedTop() + (h ? h + saturn::kPinnedListBottomGap : 0);
++  }
++
++  void EnsureActiveTabInSpace() {
++    if (!browser_ || space_id_.empty()) {
++      return;
++    }
++    TabStripModel* const model = browser_->GetTabStripModel();
++    if (saturn::GetTabSpace(model->GetActiveWebContents()) == space_id_) {
++      return;
++    }
++    base::AutoReset<bool> switching(&switching_, true);
++    if (auto it = last_active_.find(space_id_); it != last_active_.end()) {
++      if (tabs::TabInterface* tab = it->second.Get()) {
++        const int index = model->GetIndexOfTab(tab);
++        if (index != TabStripModel::kNoTab &&
++            saturn::GetTabSpace(tab->GetContents()) == space_id_) {
++          model->ActivateTabAt(index);
++          return;
++        }
++      }
++    }
++    for (int i = model->count() - 1; i >= 0; --i) {
++      content::WebContents* const contents = model->GetWebContentsAt(i);
++      if (saturn::GetTabSpace(contents) == space_id_ &&
++          !saturn::IsItemTab(contents)) {
++        model->ActivateTabAt(i);
++        return;
++      }
++    }
++    // Nothing open in this space yet: an empty page.
++    chrome::AddTabAt(browser_, GURL(url::kAboutBlankURL), -1,
++                     /*foreground=*/true);
++  }
++
++  void OnStoreChanged() {
++    saturn::Store& store = saturn::Store::Get();
++    if (!browser_ || !store.loaded()) {
++      return;
++    }
++    const std::string space = store.SpaceForWindow(browser_);
++    if (space != space_id_) {
++      space_id_ = space;
++      ImportOldItems();
++      favorites_->SetSpace(space_id_);
++      pinned_list_->SetSpace(space_id_);
++    }
++    RefreshItems();
++  }
++
++  // One-time move of Chromium pinned tabs (favorites) and the old Pinned
++  // bookmark folder into the store.
++  void ImportOldItems() {
++    saturn::Store& store = saturn::Store::Get();
++    const saturn::Space* space = store.FindSpace(space_id_);
++    if (!space || space->imported) {
++      return;
++    }
++    TabStripModel* const model = browser_->GetTabStripModel();
++    while (model->IndexOfFirstNonPinnedTab() > 0) {
++      content::WebContents* const contents = model->GetWebContentsAt(0);
++      const std::string id =
++          store.AddItem(space_id_, saturn::ItemKind::kFavorite,
++                        contents->GetLastCommittedURL(), contents->GetTitle());
++      model->SetTabPinned(0, false);
++      if (!id.empty()) {
++        saturn::SetTabTag(contents, space_id_, saturn::ItemKind::kFavorite,
++                          id);
++      }
++    }
++    if (bookmarks::BookmarkModel* bookmarks =
++            BookmarkModelFactory::GetForBrowserContext(
++                browser_->GetProfile());
++        bookmarks && bookmarks->loaded()) {
++      if (const bookmarks::BookmarkNode* folder =
++              saturn::FindPinnedFolder(bookmarks)) {
++        for (const auto& node : folder->children()) {
++          if (node->is_url()) {
++            store.AddItem(space_id_, saturn::ItemKind::kPinned, node->url(),
++                          node->GetTitle());
++          }
++        }
++      }
++    }
++    store.SetImported(space_id_);
++  }
++
++  void RefreshItems() {
++    favorites_->Sync();
++    pinned_list_->Sync();
++    // Item tabs are hidden from today's list; re-run its layout.
++    if (auto* strip = views::AsViewClass<TabStripView>(parent())) {
++      if (auto* unpinned = strip->GetUnpinnedTabsContainer()) {
++        unpinned->InvalidateLayout();
++      }
++      strip->InvalidateLayout();
++    }
++  }
++
++  // Shows Clear (and shortens the divider) while the cursor is inside the
++  // sidebar (the strip region view plus the toolbar above it).
+   void UpdateHoverChrome() {
+     const views::View* sidebar = this;
+     for (const views::View* v = parent(); v; v = v->parent()) {
+@@ -688,38 +1078,102 @@ class SaturnTodayHeader : public views::View, public ui::EventObserver {
+     }
+     const gfx::Rect sidebar_rect = sidebar->GetBoundsInScreen();
+     const gfx::Rect window_rect = GetWidget()->GetWindowBoundsInScreen();
+-    const gfx::Point cursor =
+-        display::Screen::Get()->GetCursorScreenPoint();
++    const gfx::Point cursor = display::Screen::Get()->GetCursorScreenPoint();
+     const bool inside = cursor.x() >= sidebar_rect.x() &&
+                         cursor.x() < sidebar_rect.right() &&
+                         window_rect.Contains(cursor);
+     if (inside != clear_->GetVisible()) {
+-      divider_->SetVisible(inside);
+       clear_->SetVisible(inside);
++      InvalidateLayout();
+     }
+   }
+ 
+-  int HintHeight() const {
+-    return pinned_hint_
+-               ? saturn::kPinnedRowHeight + saturn::kPinnedListBottomGap
+-               : 0;
+-  }
+-
+-  int PinnedListHeight() const {
+-    const int h = pinned_list_->GetPreferredSize().height();
+-    return h ? h + saturn::kPinnedListBottomGap : 0;
+-  }
+-
+-  raw_ptr<SaturnPinnedList> pinned_list_ = nullptr;
++  raw_ptr<BrowserWindowInterface> browser_;
++  std::string space_id_;
++  raw_ptr<SaturnItemsView> favorites_ = nullptr;
++  raw_ptr<SaturnItemsView> pinned_list_ = nullptr;
+   raw_ptr<views::View> divider_ = nullptr;
+   raw_ptr<views::LabelButton> clear_ = nullptr;
+   raw_ptr<shared::NewTabButton> new_tab_ = nullptr;
+   std::unique_ptr<views::EventMonitor> event_monitor_;
+-  bool pinned_hint_ = false;
++  base::CallbackListSubscription store_subscription_;
++  bool switching_ = false;
++  std::map<std::string, tabs::TabHandle> last_active_;
++  base::WeakPtrFactory<SaturnTodayHeader> weak_factory_{this};
+ };
+ 
+ BEGIN_METADATA(SaturnTodayHeader)
+ END_METADATA
++
++SaturnTodayHeader* SaturnHeaderFor(views::View* view) {
++  for (views::View* v = view; v; v = v->parent()) {
++    if (views::IsViewClass<VerticalTabStripRegionView>(v)) {
++      std::vector<views::View*> stack = {v};
++      while (!stack.empty()) {
++        views::View* const cur = stack.back();
++        stack.pop_back();
++        if (auto* header = views::AsViewClass<SaturnTodayHeader>(cur)) {
++          return header;
++        }
++        for (views::View* child : cur->children()) {
++          stack.push_back(child);
++        }
++      }
++      return nullptr;
++    }
++  }
++  return nullptr;
++}
++
++void SaturnSwitchToSpace(views::View* from, const std::string& space_id) {
++  if (SaturnTodayHeader* header = SaturnHeaderFor(from)) {
++    header->SwitchTo(space_id);
++  }
++}
++
++void SaturnCreateSpace(views::View* from,
++                       const std::u16string& name,
++                       bool own_cookies) {
++  SaturnTodayHeader* const header = SaturnHeaderFor(from);
++  saturn::Store& store = saturn::Store::Get();
++  const saturn::Space* current = store.FindSpace(header ? header->space_id()
++                                                        : std::string());
++  if (!header || !current) {
++    return;
++  }
++  const std::string id = store.AddSpace(
++      name.empty() ? u"Space " + base::NumberToString16(store.spaces().size() +
++                                                        1)
++                   : name,
++      current->profile, own_cookies);
++  store.SetImported(id);
++  header->SwitchTo(id);
++}
++
++void SaturnDeleteSpace(base::WeakPtr<BrowserWindowInterface> browser,
++                       std::string space_id) {
++  saturn::Store& store = saturn::Store::Get();
++  if (!browser || store.spaces().size() < 2 || !store.FindSpace(space_id)) {
++    return;
++  }
++  BrowserView* const view = BrowserView::GetBrowserViewForBrowser(browser.get());
++  if (store.SpaceForWindow(browser.get()) == space_id && view) {
++    for (const saturn::Space& space : store.spaces()) {
++      if (space.id != space_id) {
++        SaturnSwitchToSpace(view->vertical_tab_strip_region_view_for_testing(),
++                            space.id);
++        break;
++      }
++    }
++  }
++  TabStripModel* const model = browser->GetTabStripModel();
++  for (int i = model->count() - 1; i >= 0; --i) {
++    if (saturn::GetTabSpace(model->GetWebContentsAt(i)) == space_id) {
++      model->CloseWebContentsAt(i, TabCloseTypes::CLOSE_USER_GESTURE);
++    }
++  }
++  store.RemoveSpace(space_id);
++}
+ constexpr int kCollapsedResizeAreaWidth = 2;
+ constexpr int kKeyboardResizeWidth = 50;
+ constexpr int kSnapDistance = 15;
+@@ -1528,12 +1982,11 @@ int VerticalTabStripRegionView::SaturnDropZoneAt(
+       !GetBoundsInScreen().Contains(point_in_screen)) {
+     return 0;
+   }
+-  const gfx::Rect header_bounds = header->GetBoundsInScreen();
+-  if (point_in_screen.y() < header_bounds.y()) {
++  const int y = point_in_screen.y() - header->GetBoundsInScreen().y();
++  if (y < header->FavoritesZoneBottom()) {
+     return 1;
+   }
+-  if (point_in_screen.y() <
+-      header_bounds.y() + header->PinnedDropZoneHeight()) {
++  if (y < header->PinnedZoneBottom()) {
+     return 2;
+   }
+   return 0;
+@@ -1544,13 +1997,10 @@ void VerticalTabStripRegionView::SaturnSetDropZone(int zone) {
+     return;
+   }
+   saturn_drop_zone_ = zone;
+-  if (auto* const pinned = GetPinnedTabsContainer()) {
+-    pinned->SetSaturnDropSlot(zone == 1);
+-  }
+   if (TabStripView* const strip = tab_strip_view()) {
+     if (auto* const header = views::AsViewClass<SaturnTodayHeader>(
+             strip->saturn_today_header())) {
+-      header->SetPinnedDropHint(zone == 2);
++      header->SetDropHint(zone);
+     }
+   }
+ }
+@@ -1576,40 +2026,35 @@ void VerticalTabStripRegionView::SaturnOnTabDragStopped() {
+   SaturnSetDropZone(0);
+   tabs::TabInterface* const tab =
+       zone ? tab_strip_model()->GetActiveTab() : nullptr;
+-  if (!tab) {
++  TabStripView* const strip = tab_strip_view();
++  auto* const header =
++      strip ? views::AsViewClass<SaturnTodayHeader>(strip->saturn_today_header())
++            : nullptr;
++  if (!tab || !header || header->space_id().empty()) {
+     return;
+   }
+-  // The drag controller is still tearing down; act once it is done.
++  // The drag controller is still tearing down; act once it is done. The tab
++  // stays open and moves into the new favorite / Pinned list row.
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+       base::BindOnce(
+-          [](tabs::TabHandle handle, int zone) {
++          [](tabs::TabHandle handle, std::string space_id, int zone) {
+             tabs::TabInterface* const tab = handle.Get();
+-            if (!tab || !tab->GetBrowserWindowInterface()) {
+-              return;
+-            }
+-            TabStripModel* const model =
+-                tab->GetBrowserWindowInterface()->GetTabStripModel();
+-            const int index = model->GetIndexOfTab(tab);
+-            if (index == TabStripModel::kNoTab) {
+-              return;
+-            }
+-            if (zone == 1) {
+-              // Favorites: pin it (it lands at the end of the grid).
+-              model->SetTabPinned(index, true);
++            if (!tab) {
+               return;
+             }
+-            // Pinned list: the page moves into the list (a bookmark in the
+-            // space's Pinned folder); clicking the row reopens it.
+             content::WebContents* const contents = tab->GetContents();
+-            saturn::AddToPinned(
+-                BookmarkModelFactory::GetForBrowserContext(
+-                    contents->GetBrowserContext()),
+-                contents->GetTitle(), contents->GetLastCommittedURL());
+-            model->CloseWebContentsAt(index,
+-                                      TabCloseTypes::CLOSE_USER_GESTURE);
++            const saturn::ItemKind kind = zone == 1
++                                              ? saturn::ItemKind::kFavorite
++                                              : saturn::ItemKind::kPinned;
++            const std::string id = saturn::Store::Get().AddItem(
++                space_id, kind, contents->GetLastCommittedURL(),
++                contents->GetTitle());
++            if (!id.empty()) {
++              saturn::SetTabTag(contents, space_id, kind, id);
++            }
+           },
+-          tab->GetHandle(), zone));
++          tab->GetHandle(), header->space_id(), zone));
+ }
+ 
+ void VerticalTabStripRegionView::AddTabStripView(
+@@ -1680,6 +2125,7 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
+   // the bottom shows the spaces bar.
+   bottom_button_container_->SetVisible(collapsed);
+   saturn_spaces_bar_->SetVisible(!collapsed);
++  top_button_separator_->SetVisible(collapsed);
+ 
+   resize_area_->SetVisible(!collapsed ||
+                            !state_controller_->IsExpandOnHoverEnabled() ||
+diff --git a/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc b/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
+index a7b44fe..9ddb9b0 100644
+--- a/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view_layout.h"
+ 
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/saturn_store.h"
++#include "chrome/browser/ui/views/tabs/common/tab_view.h"
++
+ #include <algorithm>
+ #include <vector>
+ 
+@@ -383,6 +387,25 @@ bool UnpinnedTabContainerViewLayout::IsChildVisibleInContainer(
+   if (!CanBeVisible(child)) {
+     return false;
+   }
++  // Saturn: tabs opened from a favorite or a Pinned list row are shown by
++  // that item, not in today's list.
++  if (const auto* tab_view = views::AsViewClass<TabView>(child);
++      tab_view && tab_view->GetTabInterface() &&
++      saturn::IsItemTab(tab_view->GetTabInterface()->GetContents())) {
++    return false;
++  }
++  // Saturn: only the window's current space's tabs are listed.
++  if (const auto* tab_view = views::AsViewClass<TabView>(child);
++      tab_view && tab_view->GetTabInterface()) {
++    const tabs::TabInterface* const tab = tab_view->GetTabInterface();
++    const std::string space = saturn::GetTabSpace(tab->GetContents());
++    BrowserWindowInterface* const browser =
++        const_cast<tabs::TabInterface*>(tab)->GetBrowserWindowInterface();
++    if (!space.empty() && browser &&
++        space != saturn::Store::Get().SpaceForWindow(browser)) {
++      return false;
++    }
++  }
+   auto drag_data = tab_container_view->GetVisualDataForDraggedView(*child);
+   if (drag_data && drag_data->should_hide) {
+     return false;
+diff --git a/chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.cc b/chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.cc
+index 4c97d60..b159210 100644
+--- a/chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.cc
++++ b/chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.cc
+@@ -300,6 +300,8 @@ bool TabHoverCardController::IsHoverCardShowingForTab(
+ void TabHoverCardController::UpdateHoverCard(
+     HoverCardAnchorTarget* anchor_target,
+     TabSlotController::HoverCardUpdateType update_type) {
++  // Saturn: no hover cards (preview, memory usage); hovering only highlights.
++  anchor_target = nullptr;
+   if (hide_hover_card_lock_count_ > 0) {
+     anchor_target = nullptr;
+     update_type = TabSlotController::HoverCardUpdateType::kAnimating;
+diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
+index 759eabb..5fcb861 100644
+--- a/chrome/browser/ui/views/toolbar/reload_button.cc
++++ b/chrome/browser/ui/views/toolbar/reload_button.cc
+@@ -69,12 +69,9 @@ ReloadButton::ReloadButton(
+       // Saturn: reload icon from the Figma design.
+       reload_icon_(kSaturnReloadIcon),
+       reload_touch_icon_(kSaturnReloadIcon),
+-      stop_icon_(features::IsRoundedIconsEnabled()
+-                     ? kCloseIcon
+-                     : kNavigateStopChromeRefreshOldIcon),
+-      stop_touch_icon_(features::IsRoundedIconsEnabled()
+-                           ? kCloseIcon
+-                           : kNavigateStopTouchOldIcon),
++      // Saturn: the Figma close glyph while loading.
++      stop_icon_(kSaturnCloseTabIcon),
++      stop_touch_icon_(kSaturnCloseTabIcon),
+       double_click_timer_delay_(views::GetDoubleClickInterval()),
+       mode_switch_timer_delay_(base::Milliseconds(1350)),
+       window_metrics_manager_(window_metrics_manager) {
+@@ -203,9 +200,8 @@ std::unique_ptr<ui::SimpleMenuModel> ReloadButton::CreateMenuModel() {
+ }
+ 
+ void ReloadButton::SetVisibleMode(Mode mode) {
+-  const bool play_animation = features::IsToolbarGlowUpReloadEnabled() &&
+-                              !ui::TouchUiController::Get()->touch_ui() &&
+-                              animate_transitions_;
++  // Saturn: no animated (Lottie) reload/stop transition; the icons switch.
++  const bool play_animation = false;
+ 
+   switch (mode) {
+     case Mode::kReload:
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.cc b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+index 4b2d8f7..b426dbb 100644
+--- a/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.cc
+@@ -36,6 +36,9 @@
+ #include "ui/gfx/canvas.h"
+ #include "ui/views/background.h"
+ #include "ui/views/controls/button/image_button.h"
++#include "ui/views/controls/button/label_button.h"
++#include "ui/views/controls/button/radio_button.h"
++#include "ui/views/layout/box_layout.h"
+ #include "ui/views/controls/label.h"
+ #include "ui/views/controls/textfield/textfield.h"
+ #include "ui/views/controls/textfield/textfield_controller.h"
+@@ -301,6 +304,8 @@ void ShowSaturnUrlPopup(BrowserView* browser_view,
+ 
+ SaturnUrlPill::SaturnUrlPill(BrowserView* browser_view)
+     : browser_view_(browser_view) {
++  // Lighter while hovered (also over the copy button).
++  SetNotifyEnterExitOnChild(true);
+   label_ = AddChildView(std::make_unique<views::Label>());
+   label_->SetFontList(saturn::SidebarFont());
+   label_->SetAutoColorReadabilityEnabled(false);
+@@ -343,11 +348,21 @@ void SaturnUrlPill::Layout(PassKey) {
+ void SaturnUrlPill::OnPaintBackground(gfx::Canvas* canvas) {
+   cc::PaintFlags flags;
+   flags.setAntiAlias(true);
+-  flags.setColor(kWhite5);
++  // White 5%, 10% while hovered (like a tab row gains 5% on hover).
++  flags.setColor(IsMouseHovered() ? SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF)
++                                  : kWhite5);
+   canvas->DrawRoundRect(GetLocalBounds(), saturn::kSidebarUrlPillRadius,
+                         flags);
+ }
+ 
++void SaturnUrlPill::OnMouseEntered(const ui::MouseEvent& event) {
++  SchedulePaint();
++}
++
++void SaturnUrlPill::OnMouseExited(const ui::MouseEvent& event) {
++  SchedulePaint();
++}
++
+ bool SaturnUrlPill::OnMousePressed(const ui::MouseEvent& event) {
+   return event.IsOnlyLeftMouseButton();
+ }
+@@ -361,3 +376,178 @@ void SaturnUrlPill::OnMouseReleased(const ui::MouseEvent& event) {
+ 
+ BEGIN_METADATA(SaturnUrlPill)
+ END_METADATA
++
++// Saturn: "New space" popup - a name and whether the space shares this
++// space's cookies (logins) or gets its own. Centered over the page like the
++// URL popup; Enter or Create confirms, Escape or clicking away cancels.
++class SaturnNewSpacePopup : public views::WidgetObserver,
++                            public views::TextfieldController {
++ public:
++  explicit SaturnNewSpacePopup(BrowserView* browser_view)
++      : browser_view_(browser_view) {}
++  SaturnNewSpacePopup(const SaturnNewSpacePopup&) = delete;
++  SaturnNewSpacePopup& operator=(const SaturnNewSpacePopup&) = delete;
++  ~SaturnNewSpacePopup() override = default;
++
++  void Show(SaturnNewSpaceCallback callback) {
++    callback_ = std::move(callback);
++    if (!widget_) {
++      Create();
++    }
++    if (!name_) {
++      return;
++    }
++    views::View* const page = browser_view_->contents_container();
++    const gfx::Rect area =
++        page && page->GetVisible() && !page->bounds().IsEmpty()
++            ? page->GetBoundsInScreen()
++            : browser_view_->GetBoundsInScreen();
++    constexpr int kW = 380;
++    constexpr int kH = 196;
++    widget_->SetBounds(gfx::Rect(area.x() + (area.width() - kW) / 2,
++                                 area.y() + (area.height() - kH) / 2, kW, kH));
++    name_->SetText(std::u16string());
++    shared_->SetChecked(true);
++    widget_->Show();
++    widget_->Activate();
++    name_->RequestFocus();
++  }
++
++  void Hide() {
++    callback_.Reset();
++    if (widget_ && widget_->IsVisible()) {
++      widget_->Hide();
++    }
++  }
++
++  // views::WidgetObserver:
++  void OnWidgetActivationChanged(views::Widget* widget, bool active) override {
++    if (!active) {
++      Hide();
++    }
++  }
++  void OnWidgetDestroying(views::Widget* widget) override {
++    name_ = nullptr;
++    shared_ = nullptr;
++    own_ = nullptr;
++    observation_.Reset();
++  }
++
++  // views::TextfieldController:
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& event) override {
++    if (event.type() != ui::EventType::kKeyPressed) {
++      return false;
++    }
++    if (event.key_code() == ui::VKEY_RETURN) {
++      Submit();
++      return true;
++    }
++    if (event.key_code() == ui::VKEY_ESCAPE) {
++      Hide();
++      return true;
++    }
++    return false;
++  }
++
++ private:
++  void Create() {
++    views::Widget::InitParams params(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
++    params.parent = browser_view_->GetWidget()->GetNativeView();
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
++    params.activatable = views::Widget::InitParams::Activatable::kYes;
++    params.name = "SaturnNewSpacePopup";
++    widget_ = std::make_unique<views::Widget>();
++    widget_->Init(std::move(params));
++
++    auto contents = std::make_unique<SaturnUrlPopupContents>();
++    auto* layout =
++        contents->SetLayoutManager(std::make_unique<views::BoxLayout>(
++            views::BoxLayout::Orientation::kVertical,
++            gfx::Insets(kPopupPadding), 10));
++    layout->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kStretch);
++
++    auto* title = contents->AddChildView(
++        std::make_unique<views::Label>(u"New space"));
++    title->SetFontList(saturn::SidebarFont().DeriveWithSizeDelta(2));
++    title->SetAutoColorReadabilityEnabled(false);
++    title->SetEnabledColor(SK_ColorWHITE);
++    title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++
++    name_ = contents->AddChildView(std::make_unique<views::Textfield>());
++    name_->set_controller(this);
++    name_->SetBackgroundColor(SkColorSetARGB(0x0D, 0xFF, 0xFF, 0xFF));
++    name_->SetTextColorId(ui::kColorSysOnSurface);
++    name_->SetPlaceholderText(u"Space name");
++    name_->SetPlaceholderTextColorId(ui::kColorSysOnSurfaceSubtle);
++    name_->SetFontList(saturn::SidebarFont());
++    name_->GetViewAccessibility().SetName(u"Space name");
++
++    constexpr int kGroup = 1;
++    shared_ = contents->AddChildView(std::make_unique<views::RadioButton>(
++        u"Share logins and cookies with this space", kGroup));
++    own_ = contents->AddChildView(std::make_unique<views::RadioButton>(
++        u"Separate logins (own cookies)", kGroup));
++    for (views::RadioButton* radio : {shared_.get(), own_.get()}) {
++      radio->SetEnabledTextColors(SK_ColorWHITE);
++      radio->SetCheckedIconImageColor(SK_ColorWHITE);
++    }
++
++    auto* create = contents->AddChildView(std::make_unique<views::LabelButton>(
++        base::BindRepeating(&SaturnNewSpacePopup::Submit,
++                            base::Unretained(this)),
++        u"Create"));
++    create->SetEnabledTextColors(SK_ColorWHITE);
++    create->SetHorizontalAlignment(gfx::ALIGN_CENTER);
++    create->SetBackground(views::CreateRoundedRectBackground(
++        SkColorSetARGB(0x1A, 0xFF, 0xFF, 0xFF), 8));
++    create->SetMinSize(gfx::Size(0, 32));
++
++    widget_->SetContentsView(std::move(contents));
++    observation_.Observe(widget_.get());
++  }
++
++  void Submit() {
++    std::u16string name;
++    base::TrimWhitespace(name_->GetText(), base::TRIM_ALL, &name);
++    const bool own_cookies = own_->GetChecked();
++    SaturnNewSpaceCallback callback = std::move(callback_);
++    Hide();
++    if (callback) {
++      std::move(callback).Run(name, own_cookies);
++    }
++  }
++
++  raw_ptr<BrowserView> browser_view_;
++  std::unique_ptr<views::Widget> widget_;
++  raw_ptr<views::Textfield> name_ = nullptr;
++  raw_ptr<views::RadioButton> shared_ = nullptr;
++  raw_ptr<views::RadioButton> own_ = nullptr;
++  SaturnNewSpaceCallback callback_;
++  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
++      this};
++};
++
++DEFINE_UI_CLASS_PROPERTY_TYPE(SaturnNewSpacePopup*)
++
++namespace {
++DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(SaturnNewSpacePopup,
++                                   kSaturnNewSpacePopupKey)
++}  // namespace
++
++void ShowSaturnNewSpacePopup(BrowserView* browser_view,
++                             SaturnNewSpaceCallback callback) {
++  if (!browser_view || !browser_view->GetWidget()) {
++    return;
++  }
++  if (!browser_view->GetProperty(kSaturnNewSpacePopupKey)) {
++    browser_view->SetProperty(
++        kSaturnNewSpacePopupKey,
++        std::make_unique<SaturnNewSpacePopup>(browser_view));
++  }
++  browser_view->GetProperty(kSaturnNewSpacePopupKey)->Show(std::move(callback));
++}
+diff --git a/chrome/browser/ui/views/toolbar/saturn_url_pill.h b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+index e931614..fc089d5 100644
+--- a/chrome/browser/ui/views/toolbar/saturn_url_pill.h
++++ b/chrome/browser/ui/views/toolbar/saturn_url_pill.h
+@@ -7,6 +7,7 @@
+ 
+ #include <string>
+ 
++#include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/views/view.h"
+@@ -39,6 +40,8 @@ class SaturnUrlPill : public views::View {
+   void OnPaintBackground(gfx::Canvas* canvas) override;
+   bool OnMousePressed(const ui::MouseEvent& event) override;
+   void OnMouseReleased(const ui::MouseEvent& event) override;
++  void OnMouseEntered(const ui::MouseEvent& event) override;
++  void OnMouseExited(const ui::MouseEvent& event) override;
+ 
+  private:
+   raw_ptr<BrowserView> browser_view_;
+@@ -53,4 +56,11 @@ void ShowSaturnUrlPopup(BrowserView* browser_view,
+                         const std::u16string& text,
+                         bool new_tab);
+ 
++// Saturn: the "New space" popup. `callback` gets the name and whether the
++// space gets its own cookies; it does not run if the popup is cancelled.
++using SaturnNewSpaceCallback =
++    base::OnceCallback<void(const std::u16string& name, bool own_cookies)>;
++void ShowSaturnNewSpacePopup(BrowserView* browser_view,
++                             SaturnNewSpaceCallback callback);
++
+ #endif  // CHROME_BROWSER_UI_VIEWS_TOOLBAR_SATURN_URL_PILL_H_
+diff --git a/components/tabs/public/tab_context_menu_command.h b/components/tabs/public/tab_context_menu_command.h
+index 73d3cbc..78e6fc4 100644
+--- a/components/tabs/public/tab_context_menu_command.h
++++ b/components/tabs/public/tab_context_menu_command.h
+@@ -41,6 +41,7 @@ enum TabContextMenuCommand {
+   CommandToggleFocusGroup,
+   // Saturn: add the tab's page to the space's sidebar Pinned list.
+   CommandSaturnAddToPinned,
++  CommandSaturnAddToFavorites,
+ };
+ // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/histograms.xml:TabContextMenuCommand)
+ 
