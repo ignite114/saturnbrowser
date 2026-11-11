@@ -1,4 +1,4 @@
-From 8d670b8b969bea020ae53c75c4326982bc86d973 Mon Sep 17 00:00:00 2001
+From b3741d3dc5856dc2fccf6742ea2f68520f977673 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Wed, 11 Nov 2026 01:45:58 +0500
 Subject: [PATCH 12/12] Saturn: start page, Saturn menu (Pinned list), empty
@@ -31,9 +31,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  chrome/browser/ui/tabs/saturn_store.h         |  16 +
  chrome/browser/ui/tabs/tab_strip_model.cc     |   4 +-
  chrome/browser/ui/views/frame/BUILD.gn        |   8 +-
- .../ui/views/frame/contents_web_view.cc       |  29 +-
+ .../ui/views/frame/contents_web_view.cc       |  50 +-
  .../ui/views/frame/contents_web_view.h        |   2 +
- .../layout/browser_view_tabbed_layout_impl.cc |  31 +
+ .../layout/browser_view_tabbed_layout_impl.cc |  32 +
  chrome/browser/ui/views/frame/saturn_menu.cc  | 528 +++++++++++++++
  chrome/browser/ui/views/frame/saturn_menu.h   |  56 ++
  .../frame/vertical_tab_strip_region_view.cc   | 251 +++++++-
@@ -49,9 +49,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  .../ui/webui/saturn_start/resources/start.js  | 409 ++++++++++++
  .../saturn_start/resources/start_tail.js      | 377 +++++++++++
  .../ui/webui/saturn_start/saturn_start_page.h | 608 ++++++++++++++++++
- .../ui/webui/saturn_start/saturn_start_ui.cc  | 181 ++++++
- .../ui/webui/saturn_start/saturn_start_ui.h   |  34 +
- 36 files changed, 3158 insertions(+), 15 deletions(-)
+ .../ui/webui/saturn_start/saturn_start_ui.cc  | 190 ++++++
+ .../ui/webui/saturn_start/saturn_start_ui.h   |  38 ++
+ 36 files changed, 3193 insertions(+), 15 deletions(-)
  create mode 100644 chrome/app/vector_icons/saturn_menu_copy_link.icon
  create mode 100644 chrome/app/vector_icons/saturn_menu_delete_pinned_tab.icon
  create mode 100644 chrome/app/vector_icons/saturn_menu_dropright.icon
@@ -648,20 +648,21 @@ index 07ff356..cbca7ea 100644
      "//ui/compositor",
      "//ui/display",
 diff --git a/chrome/browser/ui/views/frame/contents_web_view.cc b/chrome/browser/ui/views/frame/contents_web_view.cc
-index 1d0ea60..4d8d226 100644
+index 1d0ea60..2281eaa 100644
 --- a/chrome/browser/ui/views/frame/contents_web_view.cc
 +++ b/chrome/browser/ui/views/frame/contents_web_view.cc
-@@ -4,6 +4,9 @@
+@@ -4,6 +4,10 @@
  
  #include "chrome/browser/ui/views/frame/contents_web_view.h"
  
 +#include "content/public/common/url_constants.h"
 +#include "url/gurl.h"
++#include "base/supports_user_data.h"
 +
  #include "base/debug/dump_without_crashing.h"
  #include "build/build_config.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
-@@ -172,6 +175,16 @@ void ContentsWebView::SetWebContents(content::WebContents* web_contents) {
+@@ -172,6 +176,17 @@ void ContentsWebView::SetWebContents(content::WebContents* web_contents) {
    SafeInvoke(
        web_modal::WebContentsModalDialogManager::FromWebContents(web_contents))
        .Then(&web_modal::WebContentsModalDialogManager::UpdateDialogHost);
@@ -672,13 +673,14 @@ index 1d0ea60..4d8d226 100644
 +}
 +
 +void ContentsWebView::PrimaryPageChanged(content::Page& page) {
++  views::WebView::PrimaryPageChanged(page);
 +  if (GetWidget()) {
 +    UpdateBackgroundColor();
 +  }
  }
  
  #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-@@ -201,6 +214,16 @@ void ContentsWebView::DidGetUserInteraction(const blink::WebInputEvent& event) {
+@@ -201,6 +216,35 @@ void ContentsWebView::DidGetUserInteraction(const blink::WebInputEvent& event) {
  #endif
  
  void ContentsWebView::UpdateBackgroundColor() {
@@ -688,14 +690,33 @@ index 1d0ea60..4d8d226 100644
 +                             : GURL::EmptyGURL();
 +  const bool background_visible =
 +      background_visible_ && !(page_url.SchemeIs(content::kChromeUIScheme) &&
-+                               page_url.host() == "start");
++                               (page_url.host() == "start" ||
++                                page_url.host() == "newtab"));
 +  if (GetWidget() && GetWidget()->GetRootView()) {
 +    GetWidget()->GetRootView()->SchedulePaint();
++  }
++  // The page's own base color (normally white) goes transparent on the start
++  // page, and back to normal when the tab navigates elsewhere.
++  if (content::WebContents* const contents = web_contents()) {
++    static const char kSaturnTransparentKey[] = "saturn_transparent_page";
++    const bool transparent = !background_visible && background_visible_;
++    const bool is_transparent =
++        contents->GetUserData(kSaturnTransparentKey) != nullptr;
++    if (transparent != is_transparent) {
++      if (transparent) {
++        contents->SetUserData(kSaturnTransparentKey,
++                              std::make_unique<base::SupportsUserData::Data>());
++        contents->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
++      } else {
++        contents->RemoveUserData(kSaturnTransparentKey);
++        contents->SetPageBaseBackgroundColor(std::nullopt);
++      }
++    }
 +  }
    const SkColor color = GetColorProvider()->GetColor(
        is_letterboxing() ? kColorWebContentsBackgroundLetterboxing
                          : kColorWebContentsBackground);
-@@ -209,19 +232,19 @@ void ContentsWebView::UpdateBackgroundColor() {
+@@ -209,19 +253,19 @@ void ContentsWebView::UpdateBackgroundColor() {
    // TODO(crbug.com/456309057): Update this to be a CHECK.
    if (SkColorGetA(color) != SK_AlphaOPAQUE) {
      base::debug::DumpWithoutCrashing();
@@ -732,7 +753,7 @@ index 0dc0d4b..5f20409 100644
    // This allows the browser to force focus synchronization in split view even
    // when native OS focus gets stuck on a different window (like a permission
 diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
-index 36d7670..e3093cd 100644
+index 36d7670..b768ec5 100644
 --- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
 +++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
 @@ -4,6 +4,13 @@
@@ -749,7 +770,7 @@ index 36d7670..e3093cd 100644
  #include <algorithm>
  #include <memory>
  #include <optional>
-@@ -61,6 +68,30 @@ class SaturnSidebarBackground : public views::Background {
+@@ -61,6 +68,31 @@ class SaturnSidebarBackground : public views::Background {
        return;
      }
      const SkColor frame = cp->GetColor(ui::kColorFrameActive);
@@ -767,7 +788,8 @@ index 36d7670..e3093cd 100644
 +    views::View* const page = browser_view->contents_container();
 +    if (contents && page && page->GetVisible()) {
 +      const GURL& url = contents->GetLastCommittedURL();
-+      if (url.SchemeIs(content::kChromeUIScheme) && url.host() == "start") {
++      if (url.SchemeIs(content::kChromeUIScheme) &&
++          (url.host() == "start" || url.host() == "newtab")) {
 +        gfx::RectF r(page->GetLocalBounds());
 +        views::View::ConvertRectToTarget(page, view, &r);
 +        canvas->sk_canvas()->clipRRect(
@@ -3517,10 +3539,10 @@ index 0000000..b6d1f6f
 +#endif  // CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_PAGE_H_
 diff --git a/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc
 new file mode 100644
-index 0000000..9ff12ac
+index 0000000..66fa205
 --- /dev/null
 +++ b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.cc
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,190 @@
 +// Copyright 2026 The Saturn Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3553,6 +3575,8 @@ index 0000000..9ff12ac
 +#include "components/omnibox/browser/autocomplete_classifier.h"
 +#include "components/omnibox/browser/autocomplete_match.h"
 +#include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_widget_host_view.h"
 +#include "content/public/browser/web_contents.h"
 +#include "content/public/browser/web_ui.h"
 +#include "content/public/browser/web_ui_data_source.h"
@@ -3695,19 +3719,26 @@ index 0000000..9ff12ac
 +  source->SetRequestFilter(base::BindRepeating(&ShouldHandle),
 +                           base::BindRepeating(&Handle));
 +  web_ui->AddMessageHandler(std::make_unique<SaturnStartHandler>());
-+  // See-through: the window's acrylic shows behind the page's 50% black.
-+  web_ui->GetWebContents()->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
++  // See-through: ContentsWebView::UpdateBackgroundColor() makes the page's
++  // base color transparent while it shows (not here: a reload's old page
++  // would reset it on destruction, after the new one set it).
 +}
 +
-+SaturnStartUI::~SaturnStartUI() {
-+  web_ui()->GetWebContents()->SetPageBaseBackgroundColor(std::nullopt);
++SaturnStartUI::~SaturnStartUI() = default;
++
++void SaturnStartUI::WebUIRenderFrameCreated(
++    content::RenderFrameHost* render_frame_host) {
++  // A transparent view also makes the page drop its base color (white).
++  if (!render_frame_host->GetParent() && render_frame_host->GetView()) {
++    render_frame_host->GetView()->SetBackgroundColor(SK_ColorTRANSPARENT);
++  }
 +}
 diff --git a/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h
 new file mode 100644
-index 0000000..7977d5e
+index 0000000..93aa006
 --- /dev/null
 +++ b/chrome/browser/ui/webui/saturn_start/saturn_start_ui.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,38 @@
 +// Copyright 2026 The Saturn Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3739,6 +3770,10 @@ index 0000000..7977d5e
 +  SaturnStartUI(const SaturnStartUI&) = delete;
 +  SaturnStartUI& operator=(const SaturnStartUI&) = delete;
 +  ~SaturnStartUI() override;
++
++  // content::WebUIController:
++  void WebUIRenderFrameCreated(
++      content::RenderFrameHost* render_frame_host) override;
 +};
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_SATURN_START_SATURN_START_UI_H_
