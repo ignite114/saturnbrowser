@@ -1,7 +1,7 @@
 From 6d6a45926be755a719cc2f1cdf90797e310465a6 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Tue, 10 Nov 2026 01:26:53 +0500
-Subject: [PATCH 07/12] Saturn: sidebar matches Figma - icons, acrylic, Inter,
+Subject: [PATCH 07/13] Saturn: sidebar matches Figma - icons, acrylic, Inter,
  settings menu
 
 - Figma icons as vector icons (back/forward/reload, sidebar, sliders,

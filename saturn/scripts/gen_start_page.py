@@ -7,7 +7,7 @@ script writes. Run it after editing the page:
 
   python saturn/scripts/gen_start_page.py <chromium src dir>
 
-start.js is built from _ink.txt (the art's logo grid) + start_tail.js.
+start.js is a copy of start_tail.js.
 """
 import os
 import sys
@@ -24,7 +24,7 @@ def read(name):
         return f.read()
 
 
-js = read('_ink.txt') + '\n' + read('start_tail.js')
+js = read('start_tail.js')
 with open(os.path.join(res, 'start.js'), 'w', encoding='utf-8',
           newline='\n') as f:
     f.write(js)

@@ -1,7 +1,7 @@
 From 9407bb6aaeaf8014e2bdeb61ff7c089eccb5ca49 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Mon, 9 Nov 2026 12:43:17 +0500
-Subject: [PATCH 06/12] Saturn: sidebar phase 3 - spaces, Pinned list
+Subject: [PATCH 06/13] Saturn: sidebar phase 3 - spaces, Pinned list
 
 Spaces are profiles, so each space has its own cookies, favorites (pinned
 tabs) and Pinned list. The sidebar shows the space name above the

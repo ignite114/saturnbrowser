@@ -1,7 +1,7 @@
 From 65ee9af0dc7072cd477e6bce93b4adb90a8286ba Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Sun, 8 Nov 2026 23:03:35 +0500
-Subject: [PATCH 03/12] Saturn: fix x64 component (dev) build with ungoogled's
+Subject: [PATCH 03/13] Saturn: fix x64 component (dev) build with ungoogled's
  clang
 
 The abseil DLL's export list names CordRepBtree::AddEdge<kFront>, which

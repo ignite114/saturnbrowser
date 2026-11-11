@@ -1,7 +1,7 @@
 From 3f1f19def1cd11f62424ccb8091c652c714efc35 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Tue, 10 Nov 2026 15:48:29 +0500
-Subject: [PATCH 11/12] Saturn: square hovers, sound toggle, Arc-style
+Subject: [PATCH 11/13] Saturn: square hovers, sound toggle, Arc-style
  scrollbars, no bookmarks bar or startup infobars
 
 Every small icon button hovers with the copy button's rounded square (no ink

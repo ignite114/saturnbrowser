@@ -1,7 +1,7 @@
 From 727794655e88fb39b476df736fadb0ffec985627 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Sun, 8 Nov 2026 22:58:46 +0500
-Subject: [PATCH 01/12] Saturn: product branding
+Subject: [PATCH 01/13] Saturn: product branding
 
 Rename the product from Chromium to Saturn:
 - BRANDING: product, company and installer names, copyright, bundle id

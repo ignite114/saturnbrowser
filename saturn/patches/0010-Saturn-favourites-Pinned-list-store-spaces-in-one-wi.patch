@@ -1,7 +1,7 @@
 From c945ee10e7bec25a3b7e0000b6d93fbfe4642a15 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Tue, 10 Nov 2026 13:50:23 +0500
-Subject: [PATCH 10/12] Saturn: favourites/Pinned list store, spaces in one
+Subject: [PATCH 10/13] Saturn: favourites/Pinned list store, spaces in one
  window, sidebar polish
 
 Favourites and the Pinned list are Saturn links saved in Saturn State.json

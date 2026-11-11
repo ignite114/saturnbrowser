@@ -1,7 +1,7 @@
 From eb46f1decd7af93dc938d508ea2614def34d7fe4 Mon Sep 17 00:00:00 2001
 From: Saturn <saturn@localhost>
 Date: Tue, 10 Nov 2026 02:02:10 +0500
-Subject: [PATCH 08/12] Saturn: Figma-style text rendering on Windows
+Subject: [PATCH 08/13] Saturn: Figma-style text rendering on Windows
 
 Unhinted outlines, grayscale anti-aliasing (no ClearType), subpixel
 positioning and no extra contrast boost, for the browser UI and web pages,

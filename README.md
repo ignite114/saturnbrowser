@@ -194,6 +194,34 @@ Commit `saturn_dev` afterwards.
    page (update to current URL / edit URL prompt via
    `ShowSaturnTextPrompt`), Duplicate, Move to (another space), Remove Pin.
    Dragging a tab shows the favourites' empty slot right away.
+13. **0013 start page art and menu, folders, tab menus, Saturn menu** – the
+   start page is every window's home: it replaces the blank tab when the
+   last tab closes, is hidden from the tab list, and Ctrl+W on it asks first
+   (`browser_commands.cc` calls `saturnCloseHint` in the page). Its art
+   (`resources/start_tail.js`) is Saturn, lit by a sun that circles it
+   (rings and planet shadow each other; stars orbit), or a black hole with a
+   spinning, lensed disk. Right-click the page for its menu: art, 12 symbol
+   styles, scale 1x-3x, light speed and position (wheel turns the light),
+   background clear / gray #151515 / black; saved in `localStorage`. The
+   search box blurs the art. Pinned list folders (store `Folder`, persisted
+   as `folders`/`folder`): create, rename, open/close, drag in and out,
+   collapse (keeps tabs) or delete with tabs; dragging a pinned tab below the
+   divider unpins it. Context menus for tabs (`SaturnShowTabMenu`), the
+   Pinned list, favourites and the empty sidebar (`SaturnStripMenuController`:
+   New Folder, Edit Space, Sort tabs by name/domain/recent, Delete Space).
+   The logo button and Alt+F/Alt+E open the Saturn menu (`SaturnMainMenu`):
+   new tab/start page/window/incognito, Spaces, History, Downloads,
+   Extensions, Developer, Print, Translate, Find, a zoom stepper, updates,
+   GitHub, Settings, Close Saturn. `saturn::ShowMenu` rows use Inter Regular
+   at 80%, 12px shortcuts, full-width dividers, and rise into place within
+   0.4s while the box appears at once. Space dots get a hover pill and show
+   the space name above. Zoom shows a percentage badge (`saturn::ShowBadge`)
+   10px from the page's top right instead of the bubble. The title bar is 4px
+   taller and translucent; DWM's own caption buttons and title are hidden
+   (no `WS_SYSMENU`, `WTNCA_NODRAWCAPTION`), and Alt/F10 don't focus the
+   hidden toolbar. Menu icons come from Tabler (`saturn/tabler-icons/`,
+   converted with `saturn/scripts/tabler_to_icon.py` into
+   `saturn_tb_*.icon`).
 
 ## Monthly update (release build)
 
